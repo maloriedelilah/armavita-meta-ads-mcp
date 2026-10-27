@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `create_ad_creative` accepts `display_link`, the display URL shown under single image and video ads (sent as `link_data.caption` for images and `call_to_action.value.link_caption` for videos).
+
+### Fixed
+
+- `description_text` is now passed through on single video creatives as `video_data.link_description`; it was previously dropped.
+- Removed the client-side 40-character headline and 125-character description checks. Those are Meta's recommended display lengths, not API limits, so valid creatives with longer text were being rejected before reaching the API. Meta still validates and reports genuinely invalid lengths.
+
 ## 1.2.0 — 2026-07-07
 
 ### Added
