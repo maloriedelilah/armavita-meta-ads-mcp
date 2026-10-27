@@ -162,13 +162,10 @@ def _normalize_flexible_asset_lists(
     if len(normalized["description_variants"]) > 5:
         return ({"error": "Maximum 5 description_variants allowed for dynamic creatives"}, {})
 
-    for idx, text in enumerate(normalized["headline_variants"]):
-        if len(str(text)) > 40:
-            return ({"error": f"Headline {idx + 1} exceeds 40 character limit"}, {})
-
-    for idx, text in enumerate(normalized["description_variants"]):
-        if len(str(text)) > 125:
-            return ({"error": f"Description {idx + 1} exceeds 125 character limit"}, {})
+    # No client-side length checks on headlines or descriptions. Meta's 40/125
+    # character figures are recommended display lengths (text past them is
+    # truncated in some placements), not API limits: Graph accepts longer text
+    # and returns its own error when a field is genuinely too long.
 
     return None, normalized
 
@@ -1055,6 +1052,7 @@ def _build_simple_image_story_spec(
     description_text: Optional[str],
     call_to_action_type: Optional[str],
     lead_form_id: Optional[str],
+    display_link: Optional[str] = None,
 ) -> Dict[str, Any]:
     link_data: Dict[str, Any] = {
         "image_hash": ad_image_hash,
@@ -1070,6 +1068,8 @@ def _build_simple_image_story_spec(
         link_data["name"] = headline_text
     if description_text:
         link_data["description"] = description_text
+    if display_link:
+        link_data["caption"] = display_link
     if call_to_action_type:
         cta: Dict[str, Any] = {"type": call_to_action_type}
         if lead_form_id:
@@ -1091,8 +1091,12 @@ def _build_simple_video_story_spec(
     thumbnail_url: Optional[str],
     call_to_action_type: Optional[str],
     lead_form_id: Optional[str],
+    description_text: Optional[str] = None,
+    display_link: Optional[str] = None,
 ) -> Dict[str, Any]:
     video_data: Dict[str, Any] = {"video_id": ad_video_id}
+    if description_text:
+        video_data["link_description"] = description_text
     if thumbnail_url:
         video_data["image_url"] = thumbnail_url
     if primary_text:
@@ -1103,6 +1107,8 @@ def _build_simple_video_story_spec(
     cta_value: Dict[str, Any] = {}
     if link_url:
         cta_value["link"] = link_url
+    if display_link:
+        cta_value["link_caption"] = display_link
     if lead_form_id:
         cta_value["lead_gen_form_id"] = lead_form_id
 
@@ -1236,6 +1242,7 @@ async def create_ad_creative(
     carousel_cards: Optional[List[Dict[str, Any]]] = None,
     product_set_id: Optional[str] = None,
     url_tags: Optional[str] = None,
+    display_link: Optional[str] = None,
 ) -> str:
     """Create an ad creative.
 
@@ -1253,6 +1260,13 @@ async def create_ad_creative(
         to enable Meta-side asset combinatorics.
       * `creative_features_spec` — Standard Enhancements / AI Sandbox creative
         toggles (image expansion, text variations, etc.).
+
+    Single image and video creatives:
+      * `display_link` — the display URL shown under the ad (e.g.
+        "example.com/shop"); sent as `link_data.caption` for images and
+        `call_to_action.value.link_caption` for videos.
+      * `description_text` — sent as `link_data.description` for images and
+        `video_data.link_description` for videos.
     """
     if not ad_account_id:
         return _json({"error": "No account ID provided"})
@@ -1366,6 +1380,8 @@ async def create_ad_creative(
                 thumbnail_url=thumbnail_url,
                 call_to_action_type=call_to_action_type,
                 lead_form_id=lead_form_id,
+                description_text=description_text,
+                display_link=display_link,
             )
         else:
             creative_payload["object_story_spec"] = _build_simple_image_story_spec(
@@ -1377,6 +1393,7 @@ async def create_ad_creative(
                 description_text=description_text,
                 call_to_action_type=call_to_action_type,
                 lead_form_id=lead_form_id,
+                display_link=display_link,
             )
 
     if product_set_id and not carousel_cards:

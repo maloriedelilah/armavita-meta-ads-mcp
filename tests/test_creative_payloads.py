@@ -115,3 +115,96 @@ async def test_create_ad_creative_catalog_sets_product_set_id():
     params = mock_api.call_args_list[0].args[2]
     assert params["product_set_id"] == "set_99"
     assert "template_data" in params["object_story_spec"]
+
+@pytest.mark.asyncio
+async def test_create_ad_creative_image_display_link_sets_caption():
+    with patch("armavita_meta_ads_mcp.core.ad_tools.make_api_request", new_callable=AsyncMock) as mock_api:
+        mock_api.side_effect = [{"id": "creative_5"}, {"id": "creative_5", "name": "Creative"}]
+
+        raw = await create_ad_creative(
+            ad_account_id="act_123",
+            ad_image_hash="hash_1",
+            facebook_page_id="123456",
+            link_url="https://example.com/product?tag=abc",
+            primary_text="Primary copy",
+            headline_text="Headline",
+            display_link="example.com/shop",
+            call_to_action_type="LEARN_MORE",
+            meta_access_token="token",
+        )
+
+    assert json.loads(raw)["success"] is True
+    link_data = mock_api.call_args_list[0].args[2]["object_story_spec"]["link_data"]
+    assert link_data["caption"] == "example.com/shop"
+    assert link_data["link"] == "https://example.com/product?tag=abc"
+
+
+@pytest.mark.asyncio
+async def test_create_ad_creative_video_carries_description_and_display_link():
+    with patch("armavita_meta_ads_mcp.core.ad_tools.make_api_request", new_callable=AsyncMock) as mock_api:
+        mock_api.side_effect = [{"id": "creative_6"}, {"id": "creative_6", "name": "Video"}]
+
+        raw = await create_ad_creative(
+            ad_account_id="act_123",
+            ad_video_id="video_1",
+            thumbnail_url="https://example.com/thumb.jpg",
+            facebook_page_id="123456",
+            link_url="https://example.com",
+            primary_text="Primary copy",
+            headline_text="Headline",
+            description_text="Description text",
+            display_link="example.com/shop",
+            call_to_action_type="LEARN_MORE",
+            meta_access_token="token",
+        )
+
+    assert json.loads(raw)["success"] is True
+    video_data = mock_api.call_args_list[0].args[2]["object_story_spec"]["video_data"]
+    assert video_data["link_description"] == "Description text"
+    assert video_data["call_to_action"]["value"]["link_caption"] == "example.com/shop"
+    assert video_data["call_to_action"]["value"]["link"] == "https://example.com"
+
+
+@pytest.mark.asyncio
+async def test_create_ad_creative_omits_optional_fields_when_not_given():
+    with patch("armavita_meta_ads_mcp.core.ad_tools.make_api_request", new_callable=AsyncMock) as mock_api:
+        mock_api.side_effect = [{"id": "creative_7"}, {"id": "creative_7", "name": "Video"}]
+
+        await create_ad_creative(
+            ad_account_id="act_123",
+            ad_video_id="video_1",
+            thumbnail_url="https://example.com/thumb.jpg",
+            facebook_page_id="123456",
+            link_url="https://example.com",
+            primary_text="Primary copy",
+            call_to_action_type="LEARN_MORE",
+            meta_access_token="token",
+        )
+
+    video_data = mock_api.call_args_list[0].args[2]["object_story_spec"]["video_data"]
+    assert "link_description" not in video_data
+    assert "link_caption" not in video_data["call_to_action"]["value"]
+
+
+@pytest.mark.asyncio
+async def test_create_ad_creative_accepts_long_headline_and_description():
+    long_headline = "H" * 120
+    long_description = "D" * 1500
+    with patch("armavita_meta_ads_mcp.core.ad_tools.make_api_request", new_callable=AsyncMock) as mock_api:
+        mock_api.side_effect = [{"id": "creative_8"}, {"id": "creative_8", "name": "Creative"}]
+
+        raw = await create_ad_creative(
+            ad_account_id="act_123",
+            ad_image_hash="hash_1",
+            facebook_page_id="123456",
+            link_url="https://example.com",
+            primary_text="Primary copy",
+            headline_text=long_headline,
+            description_text=long_description,
+            meta_access_token="token",
+        )
+
+    assert json.loads(raw)["success"] is True
+    link_data = mock_api.call_args_list[0].args[2]["object_story_spec"]["link_data"]
+    assert link_data["name"] == long_headline
+    assert link_data["description"] == long_description
