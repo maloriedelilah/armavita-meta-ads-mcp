@@ -11,6 +11,7 @@
 
 ### Fixed
 
+- `update_ad_set`: an explicit `null` `value_rule_set_id` is now refused with a message (`""` detaches; leaving it out keeps). It used to be read as "not given" and silently changed nothing, while in Graph `null` detaches. Refusing it, instead of detaching, protects clients that send `null` for every unused optional field: a budget edit can never strip a value rule. The reply now says when a value rule set was attached or detached.
 - `description_text` is now passed through on single video creatives as `video_data.link_description`; it was previously dropped.
 - Removed the client-side 40-character headline and 125-character description checks. Those are Meta's recommended display lengths, not API limits, so valid creatives with longer text were being rejected before reaching the API. Meta still validates and reports genuinely invalid lengths.
 
