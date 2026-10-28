@@ -21,7 +21,13 @@
   - Image downloads stream, stop at 30 MB (Meta's ad image limit), and have one 60-second deadline for all attempts together. A too-big response isn't retried.
   - `upload_ad_image_asset` refuses base64 over 30 MB. A path that isn't a file is no longer sent to Meta as if it were image bytes: anything that isn't valid base64 is refused, without echoing the path. Local files are size-checked before they're read.
   - `upload_ad_video_asset` refuses local files over 1 GB (it sends the file in one request) and points to `video_source_url` instead.
-
+- **No token in any log (ADS-45, security).**
+  - A redacting filter on every handler (server.log, root, the MCP SDK, httpx and uvicorn) rewrites messages, arguments and tracebacks. It removes `Bearer …`, `access_token=…`, `"access_token": …` and Meta-token-shaped strings.
+  - The Graph error paths log only exception types.
+  - In HTTP mode, uvicorn runs with the filter in its own log config, and its access log stays off.
+  - In HTTP mode there is no `server.log`: the package logs to stderr only, so nothing collects quietly on the host or in a container.
+  - In stdio mode, `server.log` is created with 0600 permissions (owner only).
+- **The Meta token is sent only in the `Authorization: Bearer` header (ADS-44, security).** It used to travel as an `access_token` query parameter (GET/DELETE) or form field (POST). That way it could end up in URLs, proxy logs and exception messages. Any token-named key in a tool's params is dropped. Graph honours the header: probed Oct 28, a fake bearer gets error 190 "Cannot parse access token", while no token gets 2500.
 - **Review follow-ups (ADS-64, ADS-66).**
   - Outside `ad_account_id` and `object_id`, ID arguments refuse `act_…` and `me`, so an object call can't be pointed at the ad account or the user. Before, `update_campaign(campaign_id="act_123", spend_cap=…)` would have set the account's spend cap.
   - `update_*` treat `status=""` as "unchanged".
