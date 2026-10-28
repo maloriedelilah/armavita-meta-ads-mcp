@@ -103,22 +103,27 @@ def configure_http(host: str, port: int, allowed_hosts: Optional[List[str]] = No
     public name a tunnel forwards (e.g. mcp.example.com) must be listed in
     `allowed_hosts`.
     """
+    settings = mcp_server.settings
+    security = settings.transport_security
+    if security is None or not security.enable_dns_rebinding_protection:
+        # The SDK enables Host/Origin checking for loopback binds. Without it,
+        # any Host would be accepted, so refuse to start rather than run open.
+        # Checked before anything is changed, so a refusal leaves the server as it was.
+        raise RuntimeError(
+            "HTTP mode needs the MCP SDK's DNS-rebinding protection (transport_security), "
+            "and it is not active. Refusing to start."
+        )
     _import_tool_modules()
     http_mode.enable()
-    settings = mcp_server.settings
+    registered = {tool.name for tool in mcp_server._tool_manager.list_tools()}
+    for name in http_mode.UNREGISTERED_TOOLS:
+        if name in registered:
+            mcp_server.remove_tool(name)
     settings.host = host
     settings.port = port
     settings.streamable_http_path = path
     settings.stateless_http = True
     settings.json_response = True
-    security = settings.transport_security
-    if security is None or not security.enable_dns_rebinding_protection:
-        # The SDK enables Host/Origin checking for loopback binds. Without it,
-        # any Host would be accepted, so refuse to start rather than run open.
-        raise RuntimeError(
-            "HTTP mode needs the MCP SDK's DNS-rebinding protection (transport_security), "
-            "and it is not active. Refusing to start."
-        )
     for name in allowed_hosts or []:
         name = name.strip()
         if not name:

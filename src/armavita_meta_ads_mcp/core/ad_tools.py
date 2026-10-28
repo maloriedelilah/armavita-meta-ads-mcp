@@ -15,6 +15,7 @@ from mcp.server.fastmcp import Image
 from PIL import Image as PILImage
 
 from . import status_policy
+from . import http_mode
 from .graph_client import McpToolError, make_api_request, meta_api_tool
 from .mcp_runtime import mcp_server
 from mcp.types import ToolAnnotations
@@ -859,6 +860,9 @@ async def upload_ad_image_asset(
 
     if not image_file_path and not image_source_url:
         return _json({"error": "Provide either 'image_file_path' (data URL or base64) or 'image_source_url'"})
+    if http_mode.is_enabled() and image_source_url:
+        # ADS-51: the server never fetches a caller-chosen URL in HTTP mode.
+        return _json({"error": http_mode.UPLOAD_BASE64_ONLY})
 
     normalized_account_id = _normalize_ad_account_id(ad_account_id)
     encoded_image = ""
@@ -878,7 +882,8 @@ async def upload_ad_image_asset(
                     "image/gif": ".gif",
                 }.get(mime_type, ".png")
                 inferred_name = f"upload{extension}"
-        elif os.path.isfile(image_file_path):
+        elif not http_mode.is_enabled() and os.path.isfile(image_file_path):
+            # ADS-50: in HTTP mode the host's filesystem is never read; the value is base64.
             with open(image_file_path, "rb") as image_fh:
                 encoded_image = base64.b64encode(image_fh.read()).decode("utf-8")
             if not inferred_name:
@@ -1000,6 +1005,9 @@ async def upload_ad_video_asset(
         return _json({"error": "No account ID provided"})
     if not video_file_path and not video_source_url:
         return _json({"error": "Provide either video_file_path or video_source_url"})
+    if http_mode.is_enabled() and video_file_path:
+        # ADS-50: no local files in HTTP mode. video_source_url is fetched by Meta, not by this server.
+        return _json({"error": http_mode.NO_LOCAL_FILES})
 
     normalized_account_id = _normalize_ad_account_id(ad_account_id)
     api_payload: Dict[str, Any] = {}
