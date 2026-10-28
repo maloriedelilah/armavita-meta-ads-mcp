@@ -216,6 +216,13 @@ class AuthManager:
 
     def invalidate_token(self) -> None:
         global needs_authentication
+        from . import http_mode
+
+        if http_mode.is_enabled():
+            # HTTP mode never reads the login cache, and a Graph auth error there
+            # is about the caller's bearer token, not the operator's login. Leave
+            # the cached stdio login (and its file) untouched.
+            return
         self.token_info = None
         needs_authentication = True
         self._cache_path().unlink(missing_ok=True)

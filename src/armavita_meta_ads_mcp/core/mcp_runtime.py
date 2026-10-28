@@ -26,8 +26,10 @@ class _ArmavitaFastMCP(FastMCP):
     """
 
     async def call_tool(self, name: str, arguments: dict[str, Any]):
-        if http_mode.is_enabled() and (arguments or {}).get("meta_access_token"):
-            raise ToolError(http_mode.TOKEN_ARGUMENT_REFUSED)
+        if http_mode.is_enabled():
+            problem = http_mode.argument_problem(arguments or {})
+            if problem:
+                raise ToolError(problem)
         return await super().call_tool(name, arguments)
 
 
@@ -110,17 +112,23 @@ def configure_http(host: str, port: int, allowed_hosts: Optional[List[str]] = No
     settings.stateless_http = True
     settings.json_response = True
     security = settings.transport_security
-    if security is not None and security.enable_dns_rebinding_protection:
-        for name in allowed_hosts or []:
-            name = name.strip()
-            if not name:
-                continue
-            for entry in (name, f"{name}:*"):
-                if entry not in security.allowed_hosts:
-                    security.allowed_hosts.append(entry)
-            for origin in (f"https://{name}", f"http://{name}"):
-                if origin not in security.allowed_origins:
-                    security.allowed_origins.append(origin)
+    if security is None or not security.enable_dns_rebinding_protection:
+        # The SDK enables Host/Origin checking for loopback binds. Without it,
+        # any Host would be accepted, so refuse to start rather than run open.
+        raise RuntimeError(
+            "HTTP mode needs the MCP SDK's DNS-rebinding protection (transport_security), "
+            "and it is not active. Refusing to start."
+        )
+    for name in allowed_hosts or []:
+        name = name.strip()
+        if not name:
+            continue
+        for entry in (name, f"{name}:*"):
+            if entry not in security.allowed_hosts:
+                security.allowed_hosts.append(entry)
+        origin = f"https://{name}"
+        if origin not in security.allowed_origins:
+            security.allowed_origins.append(origin)
 
 
 def _run_streamable_http(host: str, port: int, allowed_hosts: Optional[List[str]], path: str) -> int:
