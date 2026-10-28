@@ -77,6 +77,25 @@ def install_everywhere(logger_names: Iterable[str] = ()) -> None:
         install_on_handlers(logging.getLogger(name).handlers)
 
 
+def log_to_stderr_only(logger: logging.Logger) -> None:
+    """Replace a logger's file handlers with one redacting stderr handler.
+
+    Used in HTTP mode: nothing collects quietly in a file on the host (or in a
+    container), and whatever runs the server decides where stderr goes.
+    """
+    import sys
+
+    for handler in list(logger.handlers):
+        if isinstance(handler, logging.FileHandler):
+            logger.removeHandler(handler)
+            handler.close()
+    if not any(isinstance(h, logging.StreamHandler) and getattr(h, "stream", None) is sys.stderr for h in logger.handlers):
+        stream = logging.StreamHandler(sys.stderr)
+        stream.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+        logger.addHandler(stream)
+    install_on_handlers(logger.handlers)
+
+
 def uvicorn_log_config() -> Dict[str, Any]:
     """uvicorn's default logging config, with the redacting filter on its handlers."""
     import copy

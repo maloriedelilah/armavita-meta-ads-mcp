@@ -46,7 +46,13 @@ def _create_logger() -> logging.Logger:
         return logger
 
     logger.setLevel(logging.INFO)
-    handler = logging.FileHandler(_resolve_log_file(), encoding="utf-8")
+    log_file = _resolve_log_file()
+    handler = logging.FileHandler(log_file, encoding="utf-8")
+    try:
+        # Only the user may read the log (ADS-45); a no-op where chmod isn't supported.
+        os.chmod(log_file, 0o600)
+    except OSError:
+        pass
     formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
     handler.setFormatter(formatter)
     install_on_handlers([handler])  # ADS-45: no token reaches server.log

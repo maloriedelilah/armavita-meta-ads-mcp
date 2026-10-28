@@ -151,6 +151,8 @@ def _run_streamable_http(host: str, port: int, allowed_hosts: Optional[List[str]
     # ADS-45: the redacting filter goes on every handler that could see a request
     # (root, the MCP SDK, httpx, and uvicorn's own handlers via its log config).
     log_redaction.install_everywhere(_LIBRARY_LOGGERS)
+    # In HTTP mode, no server.log: the package logs to stderr only (Errata, ADS-45).
+    log_redaction.log_to_stderr_only(logger)
     uvicorn.run(
         app,
         host=host,

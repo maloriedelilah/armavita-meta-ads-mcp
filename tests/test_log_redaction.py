@@ -166,3 +166,27 @@ async def test_http_session_never_logs_the_token(http_session_logs):
 
     assert capture.lines, "nothing was logged, so the test would prove nothing"
     assert TOKEN not in capture.text
+
+
+def test_http_mode_logs_to_stderr_only(tmp_path):
+    logger = logging.getLogger("ads45.stderr_only")
+    file_handler = logging.FileHandler(tmp_path / "server.log")
+    logger.addHandler(file_handler)
+    log_redaction.log_to_stderr_only(logger)
+
+    assert not any(isinstance(h, logging.FileHandler) for h in logger.handlers)
+    streams = [h for h in logger.handlers if isinstance(h, logging.StreamHandler)]
+    assert streams and streams[0].stream is sys.stderr
+    assert all(any(isinstance(f, log_redaction.TokenRedactingFilter) for f in h.filters) for h in logger.handlers)
+    for h in list(logger.handlers):
+        logger.removeHandler(h)
+
+
+def test_server_log_is_private():
+    import os
+    import stat
+
+    if os.name != "posix":
+        pytest.skip("chmod semantics")
+    log_file = media_helpers._resolve_log_file()
+    assert stat.S_IMODE(os.stat(log_file).st_mode) == 0o600
