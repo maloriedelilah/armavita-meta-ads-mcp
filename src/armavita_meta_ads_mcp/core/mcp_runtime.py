@@ -11,7 +11,7 @@ from typing import Any, List, Optional
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 
-from . import http_mode
+from . import http_mode, log_redaction
 from .auth_state import login as login_auth
 from .media_helpers import logger
 
@@ -88,8 +88,12 @@ def _import_tool_modules() -> None:
     )
 
 
+_LIBRARY_LOGGERS = ("mcp", "httpx", "httpcore", "uvicorn", "uvicorn.error", "uvicorn.access")
+
+
 def _run_stdio() -> int:
     _import_tool_modules()
+    log_redaction.install_everywhere(_LIBRARY_LOGGERS)
     mcp_server.run(transport="stdio")
     return 0
 
@@ -144,7 +148,17 @@ def _run_streamable_http(host: str, port: int, allowed_hosts: Optional[List[str]
     logger.info("http_mode_start host=%s port=%s path=%s", host, port, path)
     # access_log=False: uvicorn's access log is off so request lines and
     # headers are never written by the HTTP layer.
-    uvicorn.run(app, host=host, port=port, log_level="warning", access_log=False)
+    # ADS-45: the redacting filter goes on every handler that could see a request
+    # (root, the MCP SDK, httpx, and uvicorn's own handlers via its log config).
+    log_redaction.install_everywhere(_LIBRARY_LOGGERS)
+    uvicorn.run(
+        app,
+        host=host,
+        port=port,
+        log_level="warning",
+        access_log=False,
+        log_config=log_redaction.uvicorn_log_config(),
+    )
     return 0
 
 
