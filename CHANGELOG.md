@@ -9,12 +9,14 @@
 ### Added
 
 - Streamable HTTP transport (`--transport streamable-http`, with `--host`, `--port`, `--path` and repeatable `--allowed-host` for a tunnel's public name). In HTTP mode the Meta token comes only from each request's `Authorization: Bearer` header. It is never cached, and there is no fallback to `META_ACCESS_TOKEN`, the `--login` cache or app credentials. A `meta_access_token` tool argument is refused on every tool, and uvicorn's access log is off. stdio stays the default and is unchanged.
-- `list_value_rule_sets` and `read_value_rule_set`: read an ad account's value rule sets (`act_<id>/value_rule_set`) and the rules inside a set.
+- `list_value_rule_sets` and `read_value_rule_set`: read an ad account's value rule sets (`act_<id>/value_rule_set`) and the rules inside a set (each rule's name, adjustment and status; Meta does not return the condition a rule matches).
 - `create_ad_set` and `update_ad_set` accept `value_rule_set_id` to attach a value rule set; on `update_ad_set` an empty string detaches it. `read_ad_set` and `list_ad_sets` now return `value_rule_set_id`.
 - `create_ad_creative` accepts `display_link`, the display URL shown under single image and video ads (sent as `link_data.caption` for images and `call_to_action.value.link_caption` for videos).
 
 ### Fixed
 
+- `update_ad_set`: an explicit `null` `value_rule_set_id` is now refused with a message (`""` detaches; leaving it out keeps). It used to be read as "not given" and silently changed nothing, while in Graph `null` detaches. Refusing it, instead of detaching, protects clients that send `null` for every unused optional field: a budget edit can never strip a value rule. The reply now says when a value rule set was attached or detached.
+- **IDs can no longer reshape Graph requests (ADS-53, security).** Every tool's ID arguments must be plain IDs. `*_id` and `*_ids` allow only letters, digits and `_`; `ad_account_id` must be `act_<digits>` or digits, and `meta_user_id` must be `me` or digits. `make_api_request` also refuses any Graph path that isn't plain segments. Before, `update_ad(ad_id="321?status=ACTIVE", bid_amount=50)` activated the ad, and `custom_audience_id="77#"` on a remove-users call deleted the whole audience. Any argument mentioning `access_token` (for example `fields="name,access_token"`) is refused, and any response field whose name contains `access_token` (such as Page tokens) is redacted.
 - **Status safety (ADS-54).** Following the house rules: everything is built paused, the user reviews before activating, and nothing is deleted.
   - `create_campaign`, `create_ad_set`, `create_ad` and `clone_campaign`/`clone_ad_set`/`clone_ad` always create PAUSED. A missing, null or `""` status means PAUSED (before, `status=""` replaced the default), and ACTIVE or any other value is refused with a message to activate later through the update tool.
   - `update_campaign`, `update_ad_set` and `update_ad` accept only ACTIVE or PAUSED (any case) and refuse DELETED and ARCHIVED.

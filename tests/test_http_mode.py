@@ -188,7 +188,7 @@ async def test_concurrent_requests_each_see_only_their_own_token(http_server):
         await asyncio.sleep(random.uniform(0, 0.02))
         return {"data": [{"endpoint": endpoint, "token": token}]}
 
-    tokens = {f"user{i}": f"TOKEN_{i:03d}_0123456789abcdef" for i in range(40)}
+    tokens = {str(100000 + i): f"TOKEN_{i:03d}_0123456789abcdef" for i in range(40)}  # meta_user_id must be numeric (ADS-53)
     specs = [("list_ad_accounts", {"meta_user_id": who}, {"authorization": f"Bearer {tok}"}) for who, tok in tokens.items()]
     with patch(_PATCH_TARGET, new=AsyncMock(side_effect=fake_graph)):
         results = await _concurrent_calls(http_server, specs)
