@@ -14,6 +14,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import httpx
 
 from . import auth_state as auth
+from . import http_mode
 from .auth_state import auth_manager
 from .graph_constants import META_GRAPH_API_BASE, META_GRAPH_API_VERSION
 from .media_helpers import USER_AGENT, logger
@@ -312,6 +313,11 @@ def meta_api_tool(func):
                 token = await auth.get_current_access_token()
                 if token:
                     kwargs["meta_access_token"] = token
+                elif http_mode.is_enabled():
+                    return json.dumps(
+                        {"error": {"message": "Not authenticated", "details": {"description": http_mode.MISSING_BEARER}}},
+                        indent=2,
+                    )
                 else:
                     return _auth_error_payload()
 
