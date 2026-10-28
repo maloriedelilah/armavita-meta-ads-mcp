@@ -17,7 +17,7 @@ It is built for local MCP clients (Claude Code, Cursor, Codex) and supports:
 - `mcp[cli]==1.27.2`
 - Meta Marketing API `v25.0` by default (`META_GRAPH_API_VERSION` override supported)
 
-Current contract version: `1.2.0` (**78 tools**).
+Current contract version: `1.2.0` (**80 tools**).
 
 The default OAuth scope (`META_AUTH_SCOPE`) requests `ads_management`, `ads_read`, `business_management`, `public_profile`, `pages_show_list`, `pages_read_engagement`, `instagram_basic`, and `threads_business_basic`. The catalog tools additionally require `catalog_management` — add it to `META_AUTH_SCOPE` if you use them.
 
@@ -104,7 +104,7 @@ Beyond the core auth variables above, the server reads four optional knobs:
 | `META_MCP_DR_CAMPAIGN_SCAN_LIMIT` | `10` | Number of ad accounts whose campaigns are scanned by `search_web_content` research queries. |
 | `META_MCP_DISABLE_DELIVERY_FALLBACK` | `1` | Set to `0` to let `estimate_audience_size` fall back to the `delivery_estimate` edge when `reachestimate` returns an error. |
 
-## Tool Coverage (78 tools)
+## Tool Coverage (80 tools)
 
 ### Accounts & controls
 - `list_ad_accounts`, `read_ad_account`, `get_account_controls`, `update_account_controls`, `list_account_pages`, `search_pages`
@@ -125,6 +125,9 @@ Beyond the core auth variables above, the server reads four optional knobs:
 - `list_insights`, `create_report`
 - Async insights: `create_insights_job`, `read_insights_job`, `read_insights_job_results`
 - `list_ad_custom_derived_metrics`
+
+### Value rules
+- `list_value_rule_sets`, `read_value_rule_set` (read-only; includes the rules inside a set)
 
 ### Custom conversions
 - `list_custom_conversions`, `read_custom_conversion`, `create_custom_conversion`, `update_custom_conversion`, `delete_custom_conversion`
