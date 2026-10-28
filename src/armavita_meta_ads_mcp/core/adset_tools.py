@@ -17,6 +17,13 @@ _BID_STRATEGIES_REQUIRING_BID_AMOUNT = {"LOWEST_COST_WITH_BID_CAP", "COST_CAP"}
 _BID_STRATEGY_MIN_ROAS = "LOWEST_COST_WITH_MIN_ROAS"
 
 
+# Default for update_ad_set's value_rule_set_id. It lets the tool tell an
+# omitted argument apart from an explicit JSON null: FastMCP turns both into
+# None when the default is None. Omitted keeps the current set; null is
+# refused (some clients send null for every unused optional field).
+_KEEP_VALUE_RULE_SET = "keep"
+
+
 def _json(payload: Dict[str, Any]) -> str:
     return json.dumps(payload, indent=2)
 
@@ -530,17 +537,34 @@ async def update_ad_set(
     destination_type: Optional[str] = None,
     dsa_beneficiary: Optional[str] = None,
     dsa_payor: Optional[str] = None,
-    value_rule_set_id: Optional[str] = None,
+    value_rule_set_id: Optional[str] = _KEEP_VALUE_RULE_SET,
     meta_access_token: Optional[str] = None,
 ) -> str:
     """Update an ad set's delivery, budgeting, and targeting configuration.
 
-    `value_rule_set_id`: pass a value rule set ID (from `list_value_rule_sets`)
-    to attach it, or an empty string to detach the ad set's current value rule
-    set. Leave it unset (None) to keep whatever is attached now.
+    `value_rule_set_id`:
+    - a value rule set ID (from `list_value_rule_sets`) attaches that set;
+    - an empty string "" detaches the ad set's current value rule set;
+    - leave it out (or pass "keep") to keep whatever is attached now;
+    - `null` is refused. Graph treats null as "detach", but many clients send
+      null for every optional field they aren't using, and a budget edit must
+      never silently strip a value rule. Pass "" to detach.
+    The result says what happened to the value rule set. Read the ad set back
+    afterwards: `read_ad_set` returns `value_rule_set_id`.
     """
     if not ad_set_id:
         return _json({"error": "No ad set ID provided"})
+
+    if value_rule_set_id is None:
+        return _json(
+            {
+                "error": (
+                    "value_rule_set_id is null. Nothing was changed. Pass \"\" to detach the "
+                    "ad set's value rule set, a value rule set ID to attach one, or leave the "
+                    "field out to keep the current one."
+                )
+            }
+        )
 
     placement_normalized, placement_error = _normalize_placement_soft_opt_out(placement_soft_opt_out)
     if placement_error:
@@ -607,8 +631,8 @@ async def update_ad_set(
         payload["dsa_beneficiary"] = dsa_beneficiary
     if dsa_payor is not None:
         payload["dsa_payor"] = dsa_payor
-    if value_rule_set_id is not None:
-        # An empty value detaches the current value rule set (verified against the live API).
+    if str(value_rule_set_id).strip() != _KEEP_VALUE_RULE_SET:
+        # An ID attaches; an empty string detaches (verified against the live API).
         payload["value_rule_set_id"] = str(value_rule_set_id).strip()
 
     if not payload:
@@ -624,6 +648,10 @@ async def update_ad_set(
         if isinstance(result, dict):
             if update_targeting_warning:
                 result["_warning"] = update_targeting_warning
+            if "value_rule_set_id" in payload and not result.get("error"):
+                # Say what happened, so a detach is never silent in the reply.
+                sent = payload["value_rule_set_id"]
+                result["value_rule_set"] = {"detached": True} if sent == "" else {"attached": sent}
             if dropped_fields_warning:
                 existing = result.get("warnings")
                 result["warnings"] = (
