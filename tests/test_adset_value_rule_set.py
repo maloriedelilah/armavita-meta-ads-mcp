@@ -119,8 +119,12 @@ async def test_update_ad_set_null_is_refused_and_nothing_is_sent():
         raw = await update_ad_set(ad_set_id="adset_1", meta_access_token="token", daily_budget=1500, value_rule_set_id=None)
 
     mock_api.assert_not_called()
-    error = json.loads(raw)["error"]
-    assert "null" in error and 'Pass "" to detach' in error
+    reply = json.loads(raw)
+    # meta_api_tool wraps a string error reply as {"data": "<json>"}.
+    if "data" in reply:
+        reply = json.loads(reply["data"])
+    error = reply["error"]
+    assert "value_rule_set_id is null" in error and 'Pass "" to detach' in error
 
 
 @pytest.mark.asyncio
