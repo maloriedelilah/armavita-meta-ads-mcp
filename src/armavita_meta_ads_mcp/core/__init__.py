@@ -80,6 +80,7 @@ from .reach_frequency_tools import (
 )
 from .recommendation_tools import apply_recommendation, list_recommendations
 from .threads_tools import create_threads_account, get_threads_account
+from .value_rule_tools import list_value_rule_sets, read_value_rule_set
 
 __all__ = [
     "mcp_server",
@@ -164,4 +165,6 @@ __all__ = [
     "create_reach_frequency_prediction",
     "list_reach_frequency_predictions",
     "read_reach_frequency_prediction",
+    "list_value_rule_sets",
+    "read_value_rule_set",
 ]

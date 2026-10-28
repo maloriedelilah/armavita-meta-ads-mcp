@@ -88,6 +88,8 @@ EXPECTED_V1_TOOLS = {
     "create_reach_frequency_prediction",
     "list_reach_frequency_predictions",
     "read_reach_frequency_prediction",
+    "list_value_rule_sets",
+    "read_value_rule_set",
 }
 
 
