@@ -8,6 +8,7 @@ import os
 import pathlib
 import platform
 from typing import Any, Dict, Iterable, List, Optional
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -123,9 +124,38 @@ def extract_creative_image_urls(creative: Dict[str, Any]) -> List[str]:
     return _dedupe_preserving_order(candidates)
 
 
+# Meta's own image hosts. In HTTP mode the server only fetches from these
+# (ADS-51): a caller-chosen URL would let a remote caller reach the host's LAN.
+_META_IMAGE_HOST_SUFFIXES = (".fbcdn.net", ".facebook.com", ".cdninstagram.com")
+
+
+def http_mode_fetch_allowed(url: str) -> bool:
+    """In HTTP mode, only https URLs on Meta's image hosts may be fetched. Always True in stdio mode."""
+    from . import http_mode
+
+    if not http_mode.is_enabled():
+        return True
+    try:
+        parts = urlsplit(str(url))
+    except ValueError:
+        return False
+    host = (parts.hostname or "").lower()
+    return parts.scheme == "https" and parts.port in (None, 443) and host.endswith(_META_IMAGE_HOST_SUFFIXES)
+
+
+def _follow_redirects() -> bool:
+    from . import http_mode
+
+    # A redirect could leave Meta's hosts; in HTTP mode don't follow any.
+    return not http_mode.is_enabled()
+
+
 async def download_image(url: str) -> Optional[bytes]:
     """Download image bytes from a remote URL."""
     if not url:
+        return None
+    if not http_mode_fetch_allowed(url):
+        logger.warning("image_download_refused reason=not_a_meta_image_host_in_http_mode")
         return None
 
     headers = {
@@ -134,7 +164,7 @@ async def download_image(url: str) -> Optional[bytes]:
     }
 
     try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+        async with httpx.AsyncClient(follow_redirects=_follow_redirects(), timeout=30.0) as client:
             response = await client.get(url, headers=headers)
             response.raise_for_status()
             return response.content
@@ -146,6 +176,9 @@ async def download_image(url: str) -> Optional[bytes]:
 async def try_multiple_download_methods(url: str) -> Optional[bytes]:
     """Try multiple header profiles to retrieve image bytes from strict CDNs."""
     if not url:
+        return None
+    if not http_mode_fetch_allowed(url):
+        logger.warning("image_download_refused reason=not_a_meta_image_host_in_http_mode")
         return None
 
     header_profiles = [
@@ -166,7 +199,7 @@ async def try_multiple_download_methods(url: str) -> Optional[bytes]:
 
     for profile in header_profiles:
         try:
-            async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+            async with httpx.AsyncClient(follow_redirects=_follow_redirects(), timeout=30.0) as client:
                 response = await client.get(url, headers=profile)
                 response.raise_for_status()
                 return response.content
