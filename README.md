@@ -36,15 +36,24 @@ From GitHub with uv (how this fork is installed and updated):
 curl -LsSf https://astral.sh/uv/install.sh | sh   # once, if `uv --version` fails
 uv tool install --force --python 3.12 "git+https://github.com/maloriedelilah/armavita-meta-ads-mcp@main"
 which armavita-meta-ads-mcp                         # e.g. ~/.local/bin/armavita-meta-ads-mcp
+# Prints nothing? ~/.local/bin isn't on PATH yet (common on fresh WSL):
+# run `uv tool update-shell` and open a new terminal, or use the full path.
 
 # After a PR merges, pull the new main:
 uv tool install --force --reinstall --python 3.12 "git+https://github.com/maloriedelilah/armavita-meta-ads-mcp@main"
 ```
 
 ```powershell
-# Windows (Python launcher)
-py -3.12 -m pip install --user --force-reinstall --no-deps "git+https://github.com/maloriedelilah/armavita-meta-ads-mcp@main"
+# Windows: uv works the same way (install uv from https://docs.astral.sh/uv/)
+uv tool install --force --python 3.12 "git+https://github.com/maloriedelilah/armavita-meta-ads-mcp@main"
+
+# Or with the Python launcher. Don't add --no-deps: it skips mcp, httpx,
+# Pillow and requests, so a fresh install fails on import and a dependency
+# bump on main breaks silently.
+py -3.12 -m pip install --user --force-reinstall "git+https://github.com/maloriedelilah/armavita-meta-ads-mcp@main"
 ```
+
+`@main` installs whatever is on main at that moment. To know exactly which version a machine runs, install a commit instead (`...armavita-meta-ads-mcp@<sha>`).
 
 Two Linux traps:
 
@@ -126,7 +135,7 @@ nano ~/.config/Claude/claude_desktop_config.json
 
 - Use the full path from `which armavita-meta-ads-mcp` as `command`. The app doesn't read your shell's `PATH`.
 - If the file already exists (for example with a `preferences` block), keep everything in it and add `mcpServers` as another top-level key.
-- Put the token into `env` yourself, directly in the file.
+- Put the token into `env` yourself, directly in the file. The file then holds a long-lived Meta token in plain text: make it readable only by you (`chmod 600 ~/.config/Claude/claude_desktop_config.json`) and never paste its contents anywhere.
 - Check the JSON, then fully quit and reopen the app (closing the window is not enough):
 
 ```bash
