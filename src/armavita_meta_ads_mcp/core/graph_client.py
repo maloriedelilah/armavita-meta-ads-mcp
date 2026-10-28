@@ -284,14 +284,14 @@ async def make_api_request(
                     )
                     await asyncio.sleep(delay)
                     continue
-                logger.exception("Graph request failed (transport): %s", exc)
+                logger.error("Graph request failed (transport): %s", type(exc).__name__)
                 message = str(exc)
                 if "access_token=" in message.lower():
                     message = _sanitize_url(message)
                 return {"error": {"message": message}}
 
             except Exception as exc:  # noqa: BLE001
-                logger.exception("Graph request failed: %s", exc)
+                logger.error("Graph request failed: %s", type(exc).__name__)
                 message = str(exc)
                 if "access_token=" in message.lower():
                     message = _sanitize_url(message)

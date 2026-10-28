@@ -38,14 +38,24 @@ def _resolve_log_file() -> pathlib.Path:
 
 
 def _create_logger() -> logging.Logger:
+    from .log_redaction import install_on_handlers
+
     logger = logging.getLogger(LOGGER_NAME)
     if logger.handlers:
+        install_on_handlers(logger.handlers)
         return logger
 
     logger.setLevel(logging.INFO)
-    handler = logging.FileHandler(_resolve_log_file(), encoding="utf-8")
+    log_file = _resolve_log_file()
+    handler = logging.FileHandler(log_file, encoding="utf-8")
+    try:
+        # Only the user may read the log (ADS-45); a no-op where chmod isn't supported.
+        os.chmod(log_file, 0o600)
+    except OSError:
+        pass
     formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
     handler.setFormatter(formatter)
+    install_on_handlers([handler])  # ADS-45: no token reaches server.log
     logger.addHandler(handler)
     logger.propagate = False
 
