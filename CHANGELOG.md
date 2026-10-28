@@ -15,6 +15,13 @@
 
 ### Fixed
 
+- **Untrusted image bytes are handled with limits (ADS-62, security).**
+  - Pillow opens only JPEG, PNG, WEBP and GIF. An EPS in a creative can no longer make Pillow launch Ghostscript, which would inherit the server's environment.
+  - Images over 40 megapixels are refused before decoding. Pillow's default only warned up to twice its limit, and a 20 KB PNG could reach ~900 MB of memory.
+  - Image downloads stream, stop at 30 MB (Meta's ad image limit), and have one 60-second deadline for all attempts together. A too-big response isn't retried.
+  - `upload_ad_image_asset` refuses base64 over 30 MB. A path that isn't a file is no longer sent to Meta as if it were image bytes: anything that isn't valid base64 is refused, without echoing the path. Local files are size-checked before they're read.
+  - `upload_ad_video_asset` refuses local files over 1 GB (it sends the file in one request) and points to `video_source_url` instead.
+
 - **Review follow-ups (ADS-64, ADS-66).**
   - Outside `ad_account_id` and `object_id`, ID arguments refuse `act_…` and `me`, so an object call can't be pointed at the ad account or the user. Before, `update_campaign(campaign_id="act_123", spend_cap=…)` would have set the account's spend cap.
   - `update_*` treat `status=""` as "unchanged".

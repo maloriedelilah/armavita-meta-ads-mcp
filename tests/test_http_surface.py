@@ -8,11 +8,12 @@ import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from armavita_meta_ads_mcp.core import ad_tools, http_mode, media_helpers, mcp_runtime
+from armavita_meta_ads_mcp.core import ad_tools, http_mode, image_limits, media_helpers, mcp_runtime
 from armavita_meta_ads_mcp.core.ad_tools import upload_ad_image_asset, upload_ad_video_asset
 from armavita_meta_ads_mcp.core.mcp_runtime import mcp_server
 
@@ -123,21 +124,14 @@ async def test_download_refuses_internal_urls_without_any_request(http_on):
 @pytest.mark.asyncio
 async def test_download_from_meta_hosts_does_not_follow_redirects_in_http_mode(http_on):
     seen = {}
+    real_client = httpx.AsyncClient
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, content=b"img"))
 
-    class _Client:
-        def __init__(self, *args, **kwargs):
-            seen.update(kwargs)
+    def _Client(*args, **kwargs):
+        seen.update(kwargs)
+        return real_client(*args, transport=transport, **kwargs)
 
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
-            return False
-
-        async def get(self, *a, **k):
-            return MagicMock(content=b"img", raise_for_status=lambda: None)
-
-    with patch.object(media_helpers.httpx, "AsyncClient", _Client):
+    with patch.object(image_limits.httpx, "AsyncClient", _Client):
         assert await media_helpers.download_image("https://scontent.xx.fbcdn.net/a.jpg") == b"img"
 
     assert seen.get("follow_redirects") is False
