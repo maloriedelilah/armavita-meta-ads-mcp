@@ -130,7 +130,8 @@ async def test_update_ad_set_null_is_refused_and_nothing_is_sent():
 @pytest.mark.asyncio
 async def test_update_ad_set_reports_attach_and_detach_in_result():
     with patch(_PATCH_TARGET, new_callable=AsyncMock) as mock_api:
-        mock_api.return_value = {"success": True}
+        # A fresh reply per call: the tool adds keys to the dict Graph returns.
+        mock_api.side_effect = lambda *args, **kwargs: {"success": True}
         attached = json.loads(await update_ad_set(ad_set_id="adset_1", meta_access_token="token", value_rule_set_id="123"))
         detached = json.loads(await update_ad_set(ad_set_id="adset_1", meta_access_token="token", value_rule_set_id=""))
         budget_only = json.loads(await update_ad_set(ad_set_id="adset_1", meta_access_token="token", daily_budget=1000))
