@@ -17,6 +17,12 @@ _BID_STRATEGIES_REQUIRING_BID_AMOUNT = {"LOWEST_COST_WITH_BID_CAP", "COST_CAP"}
 _BID_STRATEGY_MIN_ROAS = "LOWEST_COST_WITH_MIN_ROAS"
 
 
+# Default for update_ad_set's value_rule_set_id. It lets the tool tell an
+# omitted argument apart from an explicit JSON null: FastMCP turns both into
+# None when the default is None, and Graph treats null as "detach".
+_KEEP_VALUE_RULE_SET = "keep"
+
+
 def _json(payload: Dict[str, Any]) -> str:
     return json.dumps(payload, indent=2)
 
@@ -530,14 +536,17 @@ async def update_ad_set(
     destination_type: Optional[str] = None,
     dsa_beneficiary: Optional[str] = None,
     dsa_payor: Optional[str] = None,
-    value_rule_set_id: Optional[str] = None,
+    value_rule_set_id: Optional[str] = _KEEP_VALUE_RULE_SET,
     meta_access_token: Optional[str] = None,
 ) -> str:
     """Update an ad set's delivery, budgeting, and targeting configuration.
 
-    `value_rule_set_id`: pass a value rule set ID (from `list_value_rule_sets`)
-    to attach it, or an empty string to detach the ad set's current value rule
-    set. Leave it unset (None) to keep whatever is attached now.
+    `value_rule_set_id`:
+    - a value rule set ID (from `list_value_rule_sets`) attaches that set;
+    - `null` or an empty string detaches the ad set's current value rule set,
+      as in the Graph API;
+    - leave it out (or pass "keep") to keep whatever is attached now.
+    Read the ad set back afterwards: `read_ad_set` returns `value_rule_set_id`.
     """
     if not ad_set_id:
         return _json({"error": "No ad set ID provided"})
@@ -607,8 +616,11 @@ async def update_ad_set(
         payload["dsa_beneficiary"] = dsa_beneficiary
     if dsa_payor is not None:
         payload["dsa_payor"] = dsa_payor
-    if value_rule_set_id is not None:
-        # An empty value detaches the current value rule set (verified against the live API).
+    if value_rule_set_id is None:
+        # Explicit null detaches, matching Graph (an empty value detaches; verified live).
+        payload["value_rule_set_id"] = ""
+    elif str(value_rule_set_id).strip() != _KEEP_VALUE_RULE_SET:
+        # An ID attaches; an empty string detaches.
         payload["value_rule_set_id"] = str(value_rule_set_id).strip()
 
     if not payload:

@@ -110,3 +110,57 @@ async def test_read_and_list_ad_sets_request_value_rule_set_id():
 
     assert "value_rule_set_id" in read_fields.split(",")
     assert "value_rule_set_id" in list_fields.split(",")
+
+
+@pytest.mark.asyncio
+async def test_update_ad_set_null_detaches_like_graph():
+    # ADS-38: Graph treats a null value_rule_set_id as "detach"; so does the tool.
+    with patch(_PATCH_TARGET, new_callable=AsyncMock) as mock_api:
+        mock_api.return_value = {"success": True}
+
+        await update_ad_set(ad_set_id="adset_1", meta_access_token="token", value_rule_set_id=None)
+
+    assert mock_api.call_args.args[2] == {"value_rule_set_id": ""}
+
+
+@pytest.mark.asyncio
+async def test_update_ad_set_keep_leaves_value_rule_set_alone():
+    with patch(_PATCH_TARGET, new_callable=AsyncMock) as mock_api:
+        mock_api.return_value = {"success": True}
+
+        await update_ad_set(ad_set_id="adset_1", meta_access_token="token", daily_budget=1000, value_rule_set_id="keep")
+
+    params = mock_api.call_args.args[2]
+    assert "value_rule_set_id" not in params
+    assert params["daily_budget"] == "1000"
+
+
+def _call_through_mcp(arguments):
+    """Call update_ad_set the way an MCP client does, through FastMCP's argument handling."""
+    import asyncio
+
+    from armavita_meta_ads_mcp.core.mcp_runtime import _import_tool_modules, mcp_server
+
+    _import_tool_modules()
+    return asyncio.run(mcp_server.call_tool("update_ad_set", arguments))
+
+
+def test_update_ad_set_over_mcp_null_detaches_and_omitted_keeps():
+    # The bug was here: with a None default, FastMCP gave the tool None for both
+    # an omitted argument and an explicit JSON null, so null was a silent no-op.
+    with patch(_PATCH_TARGET, new_callable=AsyncMock) as mock_api:
+        mock_api.return_value = {"success": True}
+        _call_through_mcp({"ad_set_id": "adset_1", "meta_access_token": "token", "value_rule_set_id": None})
+    assert mock_api.call_args.args[2] == {"value_rule_set_id": ""}
+
+    with patch(_PATCH_TARGET, new_callable=AsyncMock) as mock_api:
+        mock_api.return_value = {"success": True}
+        _call_through_mcp({"ad_set_id": "adset_1", "meta_access_token": "token", "daily_budget": 1000})
+    params = mock_api.call_args.args[2]
+    assert "value_rule_set_id" not in params
+    assert params["daily_budget"] == "1000"
+
+    with patch(_PATCH_TARGET, new_callable=AsyncMock) as mock_api:
+        mock_api.return_value = {"success": True}
+        _call_through_mcp({"ad_set_id": "adset_1", "meta_access_token": "token", "value_rule_set_id": "1439455934496080"})
+    assert mock_api.call_args.args[2] == {"value_rule_set_id": "1439455934496080"}

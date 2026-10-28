@@ -10,6 +10,7 @@
 
 ### Fixed
 
+- `update_ad_set`: an explicit `null` `value_rule_set_id` now detaches the value rule set, as it does in the Graph API. It used to be read as "not given" and silently changed nothing. Leaving the field out (or passing `"keep"`) still keeps the current set; `""` still detaches.
 - `description_text` is now passed through on single video creatives as `video_data.link_description`; it was previously dropped.
 - Removed the client-side 40-character headline and 125-character description checks. Those are Meta's recommended display lengths, not API limits, so valid creatives with longer text were being rejected before reaching the API. Meta still validates and reports genuinely invalid lengths.
 
