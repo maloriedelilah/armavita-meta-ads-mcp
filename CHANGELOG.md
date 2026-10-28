@@ -15,6 +15,12 @@
 
 ### Fixed
 
+- **Untrusted image bytes are handled with limits (ADS-62, security).**
+  - Pillow opens only JPEG, PNG, WEBP and GIF. An EPS in a creative can no longer make Pillow launch Ghostscript, which would inherit the server's environment.
+  - Images over 40 megapixels are refused before decoding. Pillow's default only warned up to twice its limit, and a 20 KB PNG could reach ~900 MB of memory.
+  - Image downloads ask for uncompressed bytes and refuse any compressed response, stream, stop at 30 MB (Meta's ad image limit), and have one 60-second deadline for all attempts together. A too-big response isn't retried.
+  - `upload_ad_image_asset` refuses base64 over 30 MB, and checks the decoded bytes are a JPEG, PNG, WEBP or GIF within the limits before sending them. A path that isn't a file is never sent to Meta as if it were image bytes, and the reply doesn't echo it. The check runs in linear time. Local files are read with a cap, not stat-then-read.
+  - `upload_ad_video_asset` refuses local files over 1 GB (it sends the file in one request) and points to `video_source_url` instead.
 - **No token in any log (ADS-45, security).**
   - A redacting filter on every handler (server.log, root, the MCP SDK, httpx and uvicorn) rewrites messages, arguments and tracebacks. It removes `Bearer …`, `access_token=…`, `"access_token": …` and Meta-token-shaped strings.
   - The Graph error paths log only exception types.

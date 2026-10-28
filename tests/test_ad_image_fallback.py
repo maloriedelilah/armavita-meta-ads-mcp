@@ -44,7 +44,7 @@ async def test_read_ad_image_uses_single_creative_lookup_in_fallback_path():
         "armavita_meta_ads_mcp.core.ad_tools.list_ad_creatives", new_callable=AsyncMock
     ) as mock_get_creatives, patch(
         "armavita_meta_ads_mcp.core.ad_tools.download_image", new_callable=AsyncMock
-    ) as mock_download, patch("armavita_meta_ads_mcp.core.ad_tools.PILImage.open") as mock_open, patch(
+    ) as mock_download, patch("armavita_meta_ads_mcp.core.image_limits.open_image") as mock_open, patch(
         "armavita_meta_ads_mcp.core.ad_tools.io.BytesIO"
     ) as mock_io:
         mock_api.side_effect = [mock_ad_data, mock_creative_details, mock_image_data]
