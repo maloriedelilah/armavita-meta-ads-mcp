@@ -198,17 +198,6 @@ class AuthManager:
             params["scope"] = AUTH_SCOPE
         return f"{META_OAUTH_DIALOG_BASE}?{urlencode(params)}"
 
-    def authenticate(self, force_refresh: bool = False) -> Optional[str]:
-        if not force_refresh and self.token_info and not self.token_info.is_expired():
-            return self.token_info.meta_access_token
-        port = start_callback_server()
-        self.redirect_uri = f"http://localhost:{port}/callback"
-        state = self.issue_login_state()
-        url = self.get_auth_url(state=state)
-        logger.info("Opening OAuth login URL: %s", url)
-        webbrowser.open(url)
-        return None
-
     def get_access_token(self) -> Optional[str]:
         if not self.token_info or self.token_info.is_expired():
             return None
@@ -241,6 +230,22 @@ def _store_token(token_info: TokenInfo, persist_token: bool = True) -> None:
 
 
 
+def _graph_error_code(response: Any) -> str:
+    """A short, secret-free description of a failed token exchange (Graph error code only)."""
+    try:
+        error = response.json().get("error") or {}
+        code = error.get("code")
+        return f" (Graph error code {int(code)})" if code is not None else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _printable(value: Any) -> str:
+    """Text from an OAuth callback, safe to print: no control characters, bounded length."""
+    text = "".join(ch for ch in str(value) if ch.isprintable())
+    return text[:300]
+
+
 def exchange_code_for_short_lived(auth_code: str, redirect_uri: Optional[str] = None) -> Optional[TokenInfo]:
     app_id = meta_config.get_app_id()
     app_secret = os.environ.get("META_APP_SECRET", "")
@@ -254,9 +259,11 @@ def exchange_code_for_short_lived(auth_code: str, redirect_uri: Optional[str] = 
         "code": auth_code,
     }
     try:
-        response = requests.get(META_OAUTH_TOKEN_BASE, params=params, timeout=20)
+        # POST with the secret and code in the body, never in a URL that a
+        # proxy, an exception message or a log line could record.
+        response = requests.post(META_OAUTH_TOKEN_BASE, data=params, timeout=20)
         if response.status_code != 200:
-            logger.error("Authorization code exchange failed: %s", response.text)
+            logger.error("Authorization code exchange failed: HTTP %s%s", response.status_code, _graph_error_code(response))
             return None
         payload = response.json()
         token = payload.get("access_token") or payload.get("meta_access_token")
@@ -268,7 +275,8 @@ def exchange_code_for_short_lived(auth_code: str, redirect_uri: Optional[str] = 
             meta_user_id=payload.get("user_id") or payload.get("meta_user_id"),
         )
     except Exception as exc:  # noqa: BLE001
-        logger.error("Authorization code exchange error: %s", exc)
+        # Only the exception type: requests' messages include the request URL.
+        logger.error("Authorization code exchange error: %s", type(exc).__name__)
         return None
 
 
@@ -286,9 +294,9 @@ def exchange_token_for_long_lived(short_lived_token: str) -> Optional[TokenInfo]
         "fb_exchange_token": short_lived_token,
     }
     try:
-        response = requests.get(META_OAUTH_TOKEN_BASE, params=params, timeout=20)
+        response = requests.post(META_OAUTH_TOKEN_BASE, data=params, timeout=20)
         if response.status_code != 200:
-            logger.warning("Long-lived token exchange failed: %s", response.text)
+            logger.warning("Long-lived token exchange failed: HTTP %s%s", response.status_code, _graph_error_code(response))
             return None
         payload = response.json()
         new_token = payload.get("access_token") or payload.get("meta_access_token")
@@ -299,7 +307,7 @@ def exchange_token_for_long_lived(short_lived_token: str) -> Optional[TokenInfo]
             expires_in=_coerce_expires_in(payload.get("expires_in")),
         )
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Long-lived token exchange error: %s", exc)
+        logger.warning("Long-lived token exchange error: %s", type(exc).__name__)
         return None
 
 
@@ -379,12 +387,12 @@ def login() -> None:
                 print("Authentication successful.")
                 return
             if token_container.get("error"):
-                print(f"Authentication failed: {token_container.get('error')}")
+                print(f"Authentication failed: {_printable(token_container.get('error'))}")
                 return
             time.sleep(2)
         print("Authentication timed out.")
     except Exception as exc:  # noqa: BLE001
-        print(f"Authentication error: {exc}")
+        print(f"Authentication error: {type(exc).__name__}")
     finally:
         shutdown_callback_server()
 
