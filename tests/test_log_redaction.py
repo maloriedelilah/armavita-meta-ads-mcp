@@ -182,11 +182,39 @@ def test_http_mode_logs_to_stderr_only(tmp_path):
         logger.removeHandler(h)
 
 
-def test_server_log_is_private():
+def test_server_log_is_private_from_creation(tmp_path):
     import os
     import stat
 
     if os.name != "posix":
         pytest.skip("chmod semantics")
-    log_file = media_helpers._resolve_log_file()
-    assert stat.S_IMODE(os.stat(log_file).st_mode) == 0o600
+    fresh = tmp_path / "fresh.log"
+    old = tmp_path / "old.log"
+    old.write_text("")
+    os.chmod(old, 0o644)
+    for path in (fresh, old):
+        handler = media_helpers._PrivateFileHandler(path, encoding="utf-8", delay=True)
+        assert not path.exists() or path == old  # delay=True: nothing created until a record arrives
+        handler.emit(logging.makeLogRecord({"msg": "hello"}))
+        handler.close()
+        assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+
+
+def test_http_startup_never_creates_server_log(tmp_path):
+    """Start the real entry point in HTTP mode (uvicorn stubbed) with an empty home directory."""
+    import os
+    import subprocess
+
+    script = (
+        "import sys, uvicorn\n"
+        "uvicorn.run = lambda *a, **k: None\n"
+        "from armavita_meta_ads_mcp.core import mcp_runtime\n"
+        "sys.argv = ['armavita-meta-ads-mcp', '--transport', 'streamable-http']\n"
+        "raise SystemExit(mcp_runtime.main())\n"
+    )
+    env = {**os.environ, "HOME": str(tmp_path), "APPDATA": str(tmp_path), "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")}
+    env.pop("META_ACCESS_TOKEN", None)
+    result = subprocess.run([sys.executable, "-c", script], env=env, capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stderr
+    assert "http_mode_start" in result.stderr  # the startup lines went to stderr...
+    assert not list(tmp_path.rglob("server.log"))  # ...and no log file was created
