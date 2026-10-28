@@ -79,6 +79,21 @@ def argument_problem(arguments: Any, key: str = "") -> Optional[str]:
     return None
 
 
+UPLOAD_BASE64_ONLY = (
+    "On this server (HTTP mode) images are uploaded as base64 or a data: URL in image_file_path. "
+    "It does not fetch image_source_url itself."
+)
+
+NO_LOCAL_FILES = (
+    "On this server (HTTP mode) local file paths are not accepted. "
+    "Give the video as video_source_url (Meta fetches it) instead of video_file_path."
+)
+
+# Tools that are not offered in HTTP mode (ADS-48, ADS-50): the research cache
+# is process-wide and unauthenticated, and export_ad_image_file writes to disk.
+UNREGISTERED_TOOLS = ("search_web_content", "read_web_content", "export_ad_image_file")
+
+
 def enable() -> None:
     """Switch the process into HTTP mode. Called once by the HTTP runner."""
     global _enabled

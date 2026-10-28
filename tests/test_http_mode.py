@@ -40,11 +40,14 @@ def http_server(monkeypatch):
         list(settings.transport_security.allowed_hosts) if settings.transport_security else None,
         list(settings.transport_security.allowed_origins) if settings.transport_security else None,
     )
+    saved_tools = dict(mcp_server._tool_manager._tools)  # configure_http unregisters some tools
     mcp_runtime.configure_http("127.0.0.1", 8765, ["mcp.example.com"])
     mcp_server._session_manager = None  # the SDK builds it once per process; tests need a fresh one
     app = mcp_server.streamable_http_app()
     yield app
     http_mode.disable()
+    mcp_server._tool_manager._tools.clear()
+    mcp_server._tool_manager._tools.update(saved_tools)
     mcp_server._session_manager = None
     settings.host, settings.port, settings.streamable_http_path, settings.stateless_http, settings.json_response = saved[:5]
     if settings.transport_security is not None:

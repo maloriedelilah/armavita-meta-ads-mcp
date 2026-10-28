@@ -11,6 +11,12 @@
 
 ### Fixed
 
+- **HTTP mode no longer exposes the host (ADS-48, ADS-50, ADS-51, security).**
+  - `search_web_content`, `read_web_content` (a process-wide, unauthenticated cache) and `export_ad_image_file` (writes to disk) aren't offered in HTTP mode.
+  - `upload_ad_image_asset` treats `image_file_path` as base64 or a data URL only and never reads the filesystem. It refuses `image_source_url`, so uploads are base64-only.
+  - `upload_ad_video_asset` refuses `video_file_path`. `video_source_url` still works, because Meta fetches it itself.
+  - Image downloads (`read_ad_image`) fetch only https URLs on Meta's image hosts, with no redirects.
+  - stdio is unchanged.
 - `description_text` is now passed through on single video creatives as `video_data.link_description`; it was previously dropped.
 - Removed the client-side 40-character headline and 125-character description checks. Those are Meta's recommended display lengths, not API limits, so valid creatives with longer text were being rejected before reaching the API. Meta still validates and reports genuinely invalid lengths.
 
