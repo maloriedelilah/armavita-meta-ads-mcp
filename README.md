@@ -29,6 +29,37 @@ From PyPI (once published):
 pip install armavita-meta-ads-mcp
 ```
 
+From GitHub with uv (how this fork is installed and updated):
+
+```bash
+# Linux / WSL / macOS. uv fetches Python 3.12 itself if it is missing.
+curl -LsSf https://astral.sh/uv/install.sh | sh   # once, if `uv --version` fails
+uv tool install --force --python 3.12 "git+https://github.com/maloriedelilah/armavita-meta-ads-mcp@main"
+which armavita-meta-ads-mcp                         # e.g. ~/.local/bin/armavita-meta-ads-mcp
+# Prints nothing? ~/.local/bin isn't on PATH yet (common on fresh WSL):
+# run `uv tool update-shell` and open a new terminal, or use the full path.
+
+# After a PR merges, pull the new main:
+uv tool install --force --reinstall --python 3.12 "git+https://github.com/maloriedelilah/armavita-meta-ads-mcp@main"
+```
+
+```powershell
+# Windows: uv works the same way (install uv from https://docs.astral.sh/uv/)
+uv tool install --force --python 3.12 "git+https://github.com/maloriedelilah/armavita-meta-ads-mcp@main"
+
+# Or with the Python launcher. Don't add --no-deps: it skips mcp, httpx,
+# Pillow and requests, so a fresh install fails on import and a dependency
+# bump on main breaks silently.
+py -3.12 -m pip install --user --force-reinstall "git+https://github.com/maloriedelilah/armavita-meta-ads-mcp@main"
+```
+
+`@main` installs whatever is on main at that moment. To know exactly which version a machine runs, install a commit instead (`...armavita-meta-ads-mcp@<sha>`).
+
+Two Linux traps:
+
+- `py` on Linux is usually an unrelated tool (`pythonpy`), not the Windows Python launcher, so the Windows command fails with `unrecognized arguments: -m pip install`.
+- `pip install --user` on Debian/Ubuntu (including WSL) is refused with `externally-managed-environment` (PEP 668). `uv tool install` gives the server its own environment instead.
+
 From source (recommended during development):
 
 ```bash
@@ -93,6 +124,26 @@ Then run once to complete login:
 armavita-meta-ads-mcp --login
 ```
 
+### Claude desktop app on Linux / WSL
+
+The app's **Edit config** link can't open an editor from inside WSL, so edit the file by hand:
+
+```bash
+mkdir -p ~/.config/Claude
+nano ~/.config/Claude/claude_desktop_config.json
+```
+
+- Use the full path from `which armavita-meta-ads-mcp` as `command`. The app doesn't read your shell's `PATH`.
+- If the file already exists (for example with a `preferences` block), keep everything in it and add `mcpServers` as another top-level key.
+- Put the token into `env` yourself, directly in the file. The file then holds a long-lived Meta token in plain text: make it readable only by you (`chmod 600 ~/.config/Claude/claude_desktop_config.json`) and never paste its contents anywhere.
+- Check the JSON, then fully quit and reopen the app (closing the window is not enough):
+
+```bash
+python3 -m json.tool ~/.config/Claude/claude_desktop_config.json > /dev/null && echo OK
+```
+
+The server then shows as **Running** under the app's developer settings.
+
 ## Advanced Environment Variables
 
 Beyond the core auth variables above, the server reads four optional knobs:
@@ -127,7 +178,7 @@ Beyond the core auth variables above, the server reads four optional knobs:
 - `list_ad_custom_derived_metrics`
 
 ### Value rules
-- `list_value_rule_sets`, `read_value_rule_set` (includes the rules inside a set)
+- `list_value_rule_sets`, `read_value_rule_set` (with each rule's name, `adjust_sign`, `adjust_value` and status; Meta does not return the condition a rule matches, such as age or gender)
 - Attach with `value_rule_set_id` on `create_ad_set` / `update_ad_set` (empty string on update detaches); `read_ad_set` and `list_ad_sets` return it
 
 ### Custom conversions
