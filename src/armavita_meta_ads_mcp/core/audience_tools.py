@@ -222,25 +222,6 @@ async def update_custom_audience(
 
 @mcp_server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True))
 @meta_api_tool
-async def delete_custom_audience(
-    custom_audience_id: str,
-    meta_access_token: Optional[str] = None,
-) -> str:
-    """Delete a custom audience."""
-    if not str(custom_audience_id or "").strip():
-        return _json({"error": "custom_audience_id is required"})
-
-    result = await make_api_request(
-        str(custom_audience_id).strip(),
-        meta_access_token,
-        {},
-        method="DELETE",
-    )
-    return _json(result)
-
-
-@mcp_server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True))
-@meta_api_tool
 async def manage_custom_audience_users(
     custom_audience_id: str,
     operation: str,

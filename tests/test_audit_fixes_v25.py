@@ -486,7 +486,9 @@ def test_tool_annotations_contract():
 
     _import_tool_modules()
     tools = {t.name: t for t in asyncio.run(mcp_server.list_tools())}
-    for n in ("delete_custom_audience", "delete_custom_conversion", "manage_custom_audience_users"):
+    # ADS-54: nothing is deleted through this server, so the delete tools are gone.
+    assert "delete_custom_audience" not in tools and "delete_custom_conversion" not in tools
+    for n in ("manage_custom_audience_users", "batch_products", "update_account_controls"):
         assert tools[n].annotations.destructiveHint is True
     for n in ("list_campaigns", "read_ad", "search_interests", "get_account_controls"):
         assert tools[n].annotations.readOnlyHint is True

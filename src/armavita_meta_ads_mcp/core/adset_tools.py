@@ -7,6 +7,7 @@
 import json
 from typing import Any, Dict, List, Optional
 
+from . import status_policy
 from .graph_client import make_api_request, meta_api_tool
 from .graph_constants import META_GRAPH_API_VERSION
 from .mcp_runtime import mcp_server
@@ -391,6 +392,9 @@ async def create_ad_set(
 
         {"facebook_positions": ["marketplace"], "instagram_positions": ["stream"]}
     """
+    status, status_error = status_policy.create_status(status)
+    if status_error:
+        return _json({"error": status_error})
     if not ad_account_id:
         return _json({"error": "No account ID provided"})
     if not campaign_id:
@@ -552,6 +556,9 @@ async def update_ad_set(
     The result says what happened to the value rule set. Read the ad set back
     afterwards: `read_ad_set` returns `value_rule_set_id`.
     """
+    status, status_error = status_policy.update_status(status)
+    if status_error:
+        return _json({"error": status_error})
     if not ad_set_id:
         return _json({"error": "No ad set ID provided"})
 
