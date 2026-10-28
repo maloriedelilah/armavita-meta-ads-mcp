@@ -324,6 +324,13 @@ def complete_oauth_from_auth_code(
 
 
 async def get_current_access_token() -> Optional[str]:
+    from . import http_mode
+
+    if http_mode.is_enabled():
+        # HTTP mode: only the current request's Authorization header counts.
+        # No fallback to the environment, the login cache or app credentials.
+        return http_mode.request_bearer_token()
+
     env_token = os.environ.get("META_ACCESS_TOKEN")
     if env_token:
         if len(env_token) < 20:

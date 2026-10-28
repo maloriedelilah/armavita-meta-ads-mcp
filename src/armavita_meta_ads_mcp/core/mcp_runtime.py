@@ -1,19 +1,37 @@
 # Copyright (C) 2025 ArmaVita LLC
 # SPDX-License-Identifier: AGPL-3.0-only
 
-"""FastMCP runtime assembly and stdio-first CLI entrypoint."""
+"""FastMCP runtime assembly and CLI entrypoint (stdio by default, streamable HTTP optional)."""
 
 import argparse
 import logging
 import os
-from typing import Optional
+from typing import Any, List, Optional
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
 
+from . import http_mode
 from .auth_state import login as login_auth
 from .media_helpers import logger
 
-mcp_server = FastMCP("meta-ads")
+
+class _ArmavitaFastMCP(FastMCP):
+    """FastMCP with one HTTP-mode guard on calls that come from the client.
+
+    In HTTP mode a Meta token must arrive only in the request's Authorization
+    header. A token passed as the `meta_access_token` tool argument would have
+    travelled through the agent's context and transcript, so it is refused for
+    every tool. Tool-to-tool calls inside the server don't pass through here.
+    """
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]):
+        if http_mode.is_enabled() and (arguments or {}).get("meta_access_token"):
+            raise ToolError(http_mode.TOKEN_ARGUMENT_REFUSED)
+        return await super().call_tool(name, arguments)
+
+
+mcp_server = _ArmavitaFastMCP("meta-ads")
 
 # Prevent third-party HTTP libraries from logging full request URLs that can
 # include access_token query parameters.
@@ -74,18 +92,75 @@ def _run_stdio() -> int:
     return 0
 
 
+def configure_http(host: str, port: int, allowed_hosts: Optional[List[str]] = None, path: str = "/mcp") -> None:
+    """Put the server into HTTP mode and set where it listens.
+
+    Stateless JSON responses: every request stands alone, so a tunnel or proxy
+    in front needs no session affinity. When bound to a loopback address the
+    SDK's DNS-rebinding protection only accepts localhost Host headers, so the
+    public name a tunnel forwards (e.g. mcp.example.com) must be listed in
+    `allowed_hosts`.
+    """
+    _import_tool_modules()
+    http_mode.enable()
+    settings = mcp_server.settings
+    settings.host = host
+    settings.port = port
+    settings.streamable_http_path = path
+    settings.stateless_http = True
+    settings.json_response = True
+    security = settings.transport_security
+    if security is not None and security.enable_dns_rebinding_protection:
+        for name in allowed_hosts or []:
+            name = name.strip()
+            if not name:
+                continue
+            for entry in (name, f"{name}:*"):
+                if entry not in security.allowed_hosts:
+                    security.allowed_hosts.append(entry)
+            for origin in (f"https://{name}", f"http://{name}"):
+                if origin not in security.allowed_origins:
+                    security.allowed_origins.append(origin)
+
+
+def _run_streamable_http(host: str, port: int, allowed_hosts: Optional[List[str]], path: str) -> int:
+    import uvicorn
+
+    configure_http(host, port, allowed_hosts, path)
+    app = mcp_server.streamable_http_app()
+    logger.info("http_mode_start host=%s port=%s path=%s", host, port, path)
+    # access_log=False: uvicorn's access log is off so request lines and
+    # headers are never written by the HTTP layer.
+    uvicorn.run(app, host=host, port=port, log_level="warning", access_log=False)
+    return 0
+
+
 def main() -> int:
     """CLI entrypoint used by `python -m armavita_meta_ads_mcp` and scripts."""
     parser = argparse.ArgumentParser(
-        description="Armavita Meta Ads MCP (local stdio mode).",
-        epilog="Use with local MCP clients such as Claude Code, Cursor, and Codex.",
+        description="Armavita Meta Ads MCP (stdio by default; streamable HTTP with --transport streamable-http).",
+        epilog="Use with local MCP clients such as Claude Code, Cursor, and Codex, or as a remote connector in HTTP mode.",
     )
     parser.add_argument("--login", action="store_true", help="Run login flow and cache token")
     parser.add_argument("--app-id", type=str, help="Override META_APP_ID")
     parser.add_argument("--version", action="store_true", help="Print package version")
-
-    # Explicitly reject non-stdio transports in this OSS-local build.
-    parser.add_argument("--transport", type=str, default="stdio", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--transport",
+        type=str,
+        default="stdio",
+        choices=["stdio", "streamable-http"],
+        help="stdio (default) or streamable-http. In HTTP mode the Meta token comes only from each request's "
+        "Authorization: Bearer header; META_ACCESS_TOKEN and the login cache are ignored.",
+    )
+    parser.add_argument("--host", type=str, default="127.0.0.1", help="HTTP mode: address to bind (default 127.0.0.1)")
+    parser.add_argument("--port", type=int, default=8765, help="HTTP mode: port to bind (default 8765)")
+    parser.add_argument("--path", type=str, default="/mcp", help="HTTP mode: endpoint path (default /mcp)")
+    parser.add_argument(
+        "--allowed-host",
+        action="append",
+        default=[],
+        help="HTTP mode: a public host name a tunnel forwards to this server (repeatable), e.g. mcp.example.com",
+    )
 
     args = parser.parse_args()
 
@@ -101,9 +176,8 @@ def main() -> int:
         login_cli()
         return 0
 
-    if args.transport != "stdio":
-        print("This OSS build supports local stdio MCP only.")
-        return 2
+    if args.transport == "streamable-http":
+        return _run_streamable_http(args.host, args.port, args.allowed_host, args.path)
 
     return _run_stdio()
 
