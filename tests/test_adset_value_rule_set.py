@@ -113,14 +113,27 @@ async def test_read_and_list_ad_sets_request_value_rule_set_id():
 
 
 @pytest.mark.asyncio
-async def test_update_ad_set_null_detaches_like_graph():
-    # ADS-38: Graph treats a null value_rule_set_id as "detach"; so does the tool.
+async def test_update_ad_set_null_is_refused_and_nothing_is_sent():
+    # ADS-38 review M1: null must never detach (clients send null for unused fields).
+    with patch(_PATCH_TARGET, new_callable=AsyncMock) as mock_api:
+        raw = await update_ad_set(ad_set_id="adset_1", meta_access_token="token", daily_budget=1500, value_rule_set_id=None)
+
+    mock_api.assert_not_called()
+    error = json.loads(raw)["error"]
+    assert "null" in error and 'Pass "" to detach' in error
+
+
+@pytest.mark.asyncio
+async def test_update_ad_set_reports_attach_and_detach_in_result():
     with patch(_PATCH_TARGET, new_callable=AsyncMock) as mock_api:
         mock_api.return_value = {"success": True}
+        attached = json.loads(await update_ad_set(ad_set_id="adset_1", meta_access_token="token", value_rule_set_id="123"))
+        detached = json.loads(await update_ad_set(ad_set_id="adset_1", meta_access_token="token", value_rule_set_id=""))
+        budget_only = json.loads(await update_ad_set(ad_set_id="adset_1", meta_access_token="token", daily_budget=1000))
 
-        await update_ad_set(ad_set_id="adset_1", meta_access_token="token", value_rule_set_id=None)
-
-    assert mock_api.call_args.args[2] == {"value_rule_set_id": ""}
+    assert attached["value_rule_set"] == {"attached": "123"}
+    assert detached["value_rule_set"] == {"detached": True}
+    assert "value_rule_set" not in budget_only
 
 
 @pytest.mark.asyncio
@@ -145,13 +158,14 @@ def _call_through_mcp(arguments):
     return asyncio.run(mcp_server.call_tool("update_ad_set", arguments))
 
 
-def test_update_ad_set_over_mcp_null_detaches_and_omitted_keeps():
-    # The bug was here: with a None default, FastMCP gave the tool None for both
-    # an omitted argument and an explicit JSON null, so null was a silent no-op.
+def test_update_ad_set_over_mcp_null_refused_omitted_keeps_id_attaches():
+    # The original bug lived here: with a None default, FastMCP gave the tool None
+    # for both an omitted argument and an explicit JSON null.
     with patch(_PATCH_TARGET, new_callable=AsyncMock) as mock_api:
         mock_api.return_value = {"success": True}
-        _call_through_mcp({"ad_set_id": "adset_1", "meta_access_token": "token", "value_rule_set_id": None})
-    assert mock_api.call_args.args[2] == {"value_rule_set_id": ""}
+        result = _call_through_mcp({"ad_set_id": "adset_1", "meta_access_token": "token", "value_rule_set_id": None})
+    mock_api.assert_not_called()
+    assert "value_rule_set_id is null" in str(result)
 
     with patch(_PATCH_TARGET, new_callable=AsyncMock) as mock_api:
         mock_api.return_value = {"success": True}
@@ -164,3 +178,17 @@ def test_update_ad_set_over_mcp_null_detaches_and_omitted_keeps():
         mock_api.return_value = {"success": True}
         _call_through_mcp({"ad_set_id": "adset_1", "meta_access_token": "token", "value_rule_set_id": "1439455934496080"})
     assert mock_api.call_args.args[2] == {"value_rule_set_id": "1439455934496080"}
+
+
+def test_update_ad_set_over_mcp_all_optionals_null_is_refused_not_detached():
+    # Errata's repro: a client that fills every optional with null plus a budget change.
+    import inspect
+
+    args = {name: None for name in inspect.signature(update_ad_set).parameters if name != "ad_set_id"}
+    args.update({"ad_set_id": "adset_1", "meta_access_token": "token", "daily_budget": 1500})
+    with patch(_PATCH_TARGET, new_callable=AsyncMock) as mock_api:
+        mock_api.return_value = {"success": True}
+        result = _call_through_mcp(args)
+
+    mock_api.assert_not_called()
+    assert "value_rule_set_id is null" in str(result)
