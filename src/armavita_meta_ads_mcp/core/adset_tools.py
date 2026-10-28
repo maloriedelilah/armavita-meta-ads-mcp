@@ -151,7 +151,7 @@ _PLACEMENT_SOFT_OPT_OUT_KEYS = frozenset(
 _AD_SET_LIST_FIELDS = (
     "id,name,campaign_id,status,daily_budget,lifetime_budget,targeting,bid_amount,bid_strategy,"
     "bid_constraints,optimization_goal,billing_event,start_time,end_time,created_time,updated_time,"
-    "is_dynamic_creative,placement_soft_opt_out,"
+    "is_dynamic_creative,placement_soft_opt_out,value_rule_set_id,"
     "frequency_control_specs{event,interval_days,max_frequency}"
 )
 
@@ -160,7 +160,7 @@ _AD_SET_READ_FIELDS = (
     "daily_budget,lifetime_budget,targeting,bid_amount,bid_strategy,bid_constraints,"
     "optimization_goal,billing_event,start_time,end_time,created_time,updated_time,"
     "attribution_spec,destination_type,promoted_object,pacing_type,budget_remaining,"
-    "dsa_beneficiary,dsa_payor,is_dynamic_creative,placement_soft_opt_out"
+    "dsa_beneficiary,dsa_payor,is_dynamic_creative,placement_soft_opt_out,value_rule_set_id"
 )
 
 
@@ -363,9 +363,13 @@ async def create_ad_set(
     attribution_spec: Optional[List[Dict[str, Any]]] = None,
     frequency_control_specs: Optional[List[Dict[str, Any]]] = None,
     dsa_payor: Optional[str] = None,
+    value_rule_set_id: Optional[str] = None,
     meta_access_token: Optional[str] = None,
 ) -> str:
     """Create an ad set under a campaign.
+
+    `value_rule_set_id` attaches one of the account's value rule sets (from
+    `list_value_rule_sets`) to the new ad set.
 
     `targeting` accepts the standard Meta targeting spec, including
     `excluded_custom_audiences` for audience exclusions. The legacy `exclusions`
@@ -464,6 +468,8 @@ async def create_ad_set(
         payload["attribution_spec"] = json.dumps(attribution_spec)
     if frequency_control_specs is not None:
         payload["frequency_control_specs"] = frequency_control_specs
+    if value_rule_set_id is not None and str(value_rule_set_id).strip():
+        payload["value_rule_set_id"] = str(value_rule_set_id).strip()
 
     result = await make_api_request(f"{ad_account_id}/adsets", meta_access_token, payload, method="POST")
 
@@ -524,9 +530,15 @@ async def update_ad_set(
     destination_type: Optional[str] = None,
     dsa_beneficiary: Optional[str] = None,
     dsa_payor: Optional[str] = None,
+    value_rule_set_id: Optional[str] = None,
     meta_access_token: Optional[str] = None,
 ) -> str:
-    """Update an ad set's delivery, budgeting, and targeting configuration."""
+    """Update an ad set's delivery, budgeting, and targeting configuration.
+
+    `value_rule_set_id`: pass a value rule set ID (from `list_value_rule_sets`)
+    to attach it, or an empty string to detach the ad set's current value rule
+    set. Leave it unset (None) to keep whatever is attached now.
+    """
     if not ad_set_id:
         return _json({"error": "No ad set ID provided"})
 
@@ -595,6 +607,9 @@ async def update_ad_set(
         payload["dsa_beneficiary"] = dsa_beneficiary
     if dsa_payor is not None:
         payload["dsa_payor"] = dsa_payor
+    if value_rule_set_id is not None:
+        # An empty value detaches the current value rule set (verified against the live API).
+        payload["value_rule_set_id"] = str(value_rule_set_id).strip()
 
     if not payload:
         # If the only thing the caller passed was a dropped create-only field
