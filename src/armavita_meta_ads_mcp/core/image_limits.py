@@ -20,7 +20,6 @@ import asyncio
 import base64
 import binascii
 import io
-import re
 import warnings
 from typing import Dict, Optional
 
@@ -40,15 +39,12 @@ DOWNLOAD_DEADLINE_SECONDS = 60.0
 
 PILImage.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 
-_BASE64 = re.compile(r"^[A-Za-z0-9+/\s]*={0,2}\s*$")
-
-
 class ImageRejected(ValueError):
     """The bytes are too big, too many pixels, or not an allowed format."""
 
 
-def open_image(raw: bytes) -> PILImage.Image:
-    """Open untrusted image bytes with the format and size limits applied, and load them."""
+def _open_checked(raw: bytes) -> PILImage.Image:
+    """Identify the bytes (header only) with the format, size and pixel limits applied."""
     if len(raw) > MAX_IMAGE_BYTES:
         raise ImageRejected(f"image is larger than {MAX_IMAGE_BYTES} bytes")
     try:
@@ -56,27 +52,62 @@ def open_image(raw: bytes) -> PILImage.Image:
             # Pillow only warns between MAX_IMAGE_PIXELS and twice that; treat the warning as a refusal.
             warnings.simplefilter("error", PILImage.DecompressionBombWarning)
             image = PILImage.open(io.BytesIO(raw), formats=list(ALLOWED_IMAGE_FORMATS))
-            if image.width * image.height > MAX_IMAGE_PIXELS:
-                raise ImageRejected(f"image has more than {MAX_IMAGE_PIXELS} pixels")
-            image.load()
     except (PILImage.DecompressionBombError, PILImage.DecompressionBombWarning) as exc:
         raise ImageRejected(f"image has more than {MAX_IMAGE_PIXELS} pixels") from exc
-    except PILImage.UnidentifiedImageError as exc:
+    except (PILImage.UnidentifiedImageError, OSError, ValueError) as exc:
         raise ImageRejected(f"not a {', '.join(ALLOWED_IMAGE_FORMATS)} image") from exc
+    if image.width * image.height > MAX_IMAGE_PIXELS:
+        raise ImageRejected(f"image has more than {MAX_IMAGE_PIXELS} pixels")
     return image
 
 
-def base64_problem(encoded: str) -> Optional[str]:
-    """Return why `encoded` can't be uploaded as image base64, or None if it can."""
+def open_image(raw: bytes) -> PILImage.Image:
+    """Open untrusted image bytes with the format and size limits applied, and load them."""
+    image = _open_checked(raw)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", PILImage.DecompressionBombWarning)
+        image.load()
+    return image
+
+
+def check_image(raw: bytes) -> None:
+    """Raise ImageRejected unless `raw` is an allowed image within the limits. Reads the header only."""
+    _open_checked(raw).close()
+
+
+NOT_AN_IMAGE = "image_file_path is not a readable file, and not base64 / a data: URL of a JPEG, PNG, WEBP or GIF image."
+TOO_LARGE = f"The image is larger than {MAX_IMAGE_BYTES // (1024 * 1024)} MB, Meta's limit for ad images."
+
+
+def decode_base64_image(encoded: str) -> str:
+    """Validate upload base64 and return it with whitespace removed. Raises ImageRejected with a user-facing message.
+
+    Linear time throughout (ADS-62 review): no regex, whitespace removed with split/join, then a strict decode.
+    """
     if len(encoded) > MAX_IMAGE_BASE64_CHARS:
-        return f"The image is larger than {MAX_IMAGE_BYTES // (1024 * 1024)} MB, Meta's limit for ad images."
-    if not encoded.strip() or not _BASE64.match(encoded):
-        return "image_file_path is neither a readable file nor base64 / a data: URL."
+        raise ImageRejected(TOO_LARGE)
+    compact = "".join(encoded.split())
+    if not compact:
+        raise ImageRejected(NOT_AN_IMAGE)
     try:
-        base64.b64decode(re.sub(r"\s", "", encoded), validate=True)
-    except (binascii.Error, ValueError):
-        return "image_file_path is neither a readable file nor base64 / a data: URL."
-    return None
+        raw = base64.b64decode(compact, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ImageRejected(NOT_AN_IMAGE) from exc
+    try:
+        check_image(raw)
+    except ImageRejected as exc:
+        # Decodes as base64 but isn't an allowed image (e.g. a path like "abcd"): never sent to Meta.
+        raise ImageRejected(TOO_LARGE if "larger" in str(exc) else NOT_AN_IMAGE) from exc
+    return compact
+
+
+def read_capped(path: str, max_bytes: int) -> bytes:
+    """Read at most `max_bytes` from a local file; raise ImageRejected if there's more (no stat-then-read race)."""
+    with open(path, "rb") as fh:
+        data = fh.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise ImageRejected(f"file is larger than {max_bytes} bytes")
+    return data
 
 
 async def fetch_capped(
@@ -92,14 +123,20 @@ async def fetch_capped(
     deadline = DOWNLOAD_DEADLINE_SECONDS if deadline is None else deadline
 
     async def _get() -> bytes:
+        # identity only: the cap counts the bytes we hold, so a small gzip body can't inflate past it.
+        request_headers = {**headers, "Accept-Encoding": "identity"}
         async with httpx.AsyncClient(follow_redirects=follow_redirects, timeout=30.0) as client:
-            async with client.stream("GET", url, headers=headers) as response:
+            async with client.stream("GET", url, headers=request_headers) as response:
                 response.raise_for_status()
+                encoding = response.headers.get("content-encoding", "identity").strip().lower()
+                if encoding not in ("", "identity"):
+                    raise ImageRejected(f"compressed response ({encoding}) refused")
                 declared = response.headers.get("content-length", "")
                 if declared.isdigit() and int(declared) > max_bytes:
                     raise ImageRejected(f"download is larger than {max_bytes} bytes")
                 chunks = []
                 total = 0
+                # Any content-encoding is refused above, so these are the bytes on the wire, not inflated ones.
                 async for chunk in response.aiter_bytes():
                     total += len(chunk)
                     if total > max_bytes:

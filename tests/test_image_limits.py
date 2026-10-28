@@ -156,7 +156,7 @@ async def test_a_missing_path_is_not_sent_to_meta_as_image_bytes():
             ad_account_id="act_1", image_file_path="/home/someone/private/cover-final.png", meta_access_token="t"
         )
     api.assert_not_called()
-    assert "neither a readable file nor base64" in _error(raw)
+    assert _error(raw) == image_limits.NOT_AN_IMAGE
     assert "/home/someone" not in raw
 
 
@@ -195,3 +195,62 @@ async def test_oversized_local_files_are_not_read(tmp_path, monkeypatch):
     api.assert_not_called()
     assert "Meta's limit" in _error(image_reply)
     assert "video_source_url" in _error(video_reply)
+
+
+@pytest.mark.parametrize(
+    "hostile",
+    [
+        " " * 40_000 + "!",  # Errata's repro: whitespace then one bad character
+        "A " * 20_000 + "!",
+        "\n" * 40_000 + "==!",
+    ],
+)
+def test_base64_check_is_linear_on_whitespace_heavy_input(hostile):
+    import time
+
+    start = time.perf_counter()
+    with pytest.raises(image_limits.ImageRejected):
+        image_limits.decode_base64_image(hostile)
+    assert time.perf_counter() - start < 0.2
+
+
+def test_base64_check_stays_fast_at_the_size_cap():
+    import time
+
+    hostile = " " * (image_limits.MAX_IMAGE_BASE64_CHARS - 1) + "!"
+    start = time.perf_counter()
+    with pytest.raises(image_limits.ImageRejected):
+        image_limits.decode_base64_image(hostile)
+    assert time.perf_counter() - start < 2.0
+
+
+@pytest.mark.asyncio
+async def test_valid_base64_that_is_not_an_image_is_not_sent():
+    # "abcd" decodes as base64 but is a path-like string, not an image.
+    with patch.object(ad_tools, "make_api_request", new_callable=AsyncMock) as api:
+        raw = await upload_ad_image_asset(ad_account_id="act_1", image_file_path="abcd", meta_access_token="t")
+    api.assert_not_called()
+    assert _error(raw) == image_limits.NOT_AN_IMAGE
+
+
+@pytest.mark.asyncio
+async def test_compressed_responses_are_refused_and_identity_is_requested():
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(200, headers={"content-encoding": "gzip"}, content=b"\x1f\x8b")
+
+    with patch.object(image_limits.httpx, "AsyncClient", _client_with(handler)):
+        with pytest.raises(image_limits.ImageRejected):
+            await image_limits.fetch_capped("https://scontent.xx.fbcdn.net/a.jpg", {}, follow_redirects=False)
+    assert seen[0].headers["accept-encoding"] == "identity"
+
+
+def test_read_capped_stops_reading_past_the_cap(tmp_path):
+    path = tmp_path / "f.bin"
+    path.write_bytes(b"x" * 101)
+    with pytest.raises(image_limits.ImageRejected):
+        image_limits.read_capped(str(path), 100)
+    path.write_bytes(b"x" * 100)
+    assert image_limits.read_capped(str(path), 100) == b"x" * 100
