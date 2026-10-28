@@ -7,6 +7,7 @@
 import json
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from . import status_policy
 from .graph_client import make_api_request, meta_api_tool
 from .meta_v25_guards import (
     detect_deprecated_advantage_plus_block,
@@ -170,6 +171,9 @@ async def create_campaign(
     For ad-set-level budgets, `is_adset_budget_sharing_enabled` defaults to `True`
     (Meta's recommendation in v24.0+). Override via `is_adset_budget_sharing_enabled=False`.
     """
+    status, status_error = status_policy.create_status(status)
+    if status_error:
+        return _json({"error": status_error})
     if not ad_account_id:
         return _json({"error": "No account ID provided"})
     if not name:
@@ -326,6 +330,9 @@ async def update_campaign(
     bid_constraints: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Update campaign settings for an existing campaign."""
+    status, status_error = status_policy.update_status(status)
+    if status_error:
+        return _json({"error": status_error})
     if not campaign_id:
         return _json({"error": "No campaign ID provided"})
 

@@ -91,6 +91,14 @@ class CallbackHandler(BaseHTTPRequestHandler):
         auth_error_description = params.get("error_description", [None])[0]
 
         if auth_error:
+            # An error callback only counts if it carries this login's state.
+            # Otherwise any web page could open localhost:<port>/callback?error=x
+            # and abort a login in progress. Ignore it and keep waiting.
+            if not _state_is_valid(state, token_container.get("expected_state")):
+                self._html_response(
+                    "<html><body><h1>Ignored</h1><p>This callback does not belong to the login in progress.</p></body></html>"
+                )
+                return
             primary_text = auth_error_description or auth_error
             token_container.update(
                 {
