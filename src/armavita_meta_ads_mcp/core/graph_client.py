@@ -105,9 +105,16 @@ def _remap_graph_keys(value: Any) -> Any:
     return value
 
 
-def _normalize_request_params(params: Optional[Dict[str, Any]], meta_access_token: str) -> Dict[str, Any]:
+def _normalize_request_params(params: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Graph parameters for the query string (GET/DELETE) or form body (POST).
+
+    The access token is never one of them: it travels only in the
+    Authorization header (ADS-44), so it can't land in a URL, a proxy log or an
+    exception message. Any token-named key a caller slipped into `params` is dropped.
+    """
     payload: Dict[str, Any] = _remap_graph_keys(dict(params or {}))
-    payload["access_token"] = meta_access_token
+    for key in [k for k in payload if str(k).lower() in ("access_token", "meta_access_token")]:
+        payload.pop(key)
     normalized: Dict[str, Any] = {}
     for key, value in payload.items():
         if isinstance(value, (dict, list)):
@@ -177,28 +184,29 @@ async def make_api_request(
         return {"error": {"message": path_problem}}
 
     url = f"{META_GRAPH_API_BASE}/{endpoint}"
-    request_params = _normalize_request_params(params, meta_access_token)
-    safe_params = {k: ("***TOKEN***" if k == "access_token" else v) for k, v in request_params.items()}
+    request_params = _normalize_request_params(params)
+    # The token goes in the Authorization header only, never in the URL or body (ADS-44).
+    headers = {"User-Agent": USER_AGENT, "Authorization": f"Bearer {meta_access_token}"}
 
-    logger.debug("Graph request method=%s url=%s params=%s", method, url, safe_params)
+    logger.debug("Graph request method=%s url=%s params=%s", method, url, request_params)
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         for attempt in range(_MAX_RETRY_ATTEMPTS + 1):
             try:
                 if method == "GET":
-                    response = await client.get(url, params=request_params, headers={"User-Agent": USER_AGENT})
+                    response = await client.get(url, params=request_params, headers=headers)
                 elif method == "POST":
                     if files:
                         response = await client.post(
                             url,
                             data=request_params,
                             files=files,
-                            headers={"User-Agent": USER_AGENT},
+                            headers=headers,
                         )
                     else:
-                        response = await client.post(url, data=request_params, headers={"User-Agent": USER_AGENT})
+                        response = await client.post(url, data=request_params, headers=headers)
                 elif method == "DELETE":
-                    response = await client.delete(url, params=request_params, headers={"User-Agent": USER_AGENT})
+                    response = await client.delete(url, params=request_params, headers=headers)
                 else:
                     return {"error": {"message": f"Unsupported HTTP method: {method}"}}
 
