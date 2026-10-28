@@ -153,3 +153,22 @@ def test_token_fields_are_redacted_from_responses():
     assert "EAAPAGETOKEN" not in text and "EAAOTHER" not in text and "EAANESTED" not in text and "EAAURL" not in text
     assert cleaned["data"][0]["name"] == "Page"
     assert cleaned["data"][0]["access_token"] == "***REDACTED***"
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"campaign_id": "act_123"},  # update_campaign(campaign_id="act_123", spend_cap=...) hit the account
+        {"ad_set_id": "act_1"},
+        {"custom_audience_id": "ME"},
+        {"page_ids": ["123", "act_9"]},
+    ],
+)
+def test_accounts_and_me_are_refused_where_an_object_id_belongs(arguments):
+    # ADS-64
+    assert "not an ad account" in id_validation.argument_problem(arguments)
+
+
+@pytest.mark.parametrize("arguments", [{"ad_account_id": "act_123"}, {"object_id": "act_123"}, {"meta_user_id": "me"}])
+def test_accounts_and_me_still_pass_where_they_belong(arguments):
+    assert id_validation.argument_problem(arguments) is None

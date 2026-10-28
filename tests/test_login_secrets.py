@@ -189,3 +189,10 @@ def test_printed_callback_text_has_no_control_characters():
 
 def test_unused_authenticate_is_gone():
     assert not hasattr(auth_state.AuthManager, "authenticate")
+
+
+def test_callback_failures_log_only_the_exception_type():
+    # ADS-66: no logger.exception (its traceback carries the message) and no exception text.
+    source = Path(oauth_callback_server.__file__).read_text()
+    assert "logger.exception(" not in source
+    assert ", exc)" not in source

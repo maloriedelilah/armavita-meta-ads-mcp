@@ -24,6 +24,10 @@ _SEGMENT = re.compile(r"^[A-Za-z0-9_]+$")
 _ACCOUNT_ID = re.compile(r"^(act_)?\d+$")
 _USER_ID = re.compile(r"^(me|\d+)$")
 
+# Arguments that legitimately name an ad account: the account itself, and the
+# insights/recommendations object, which may be an account, campaign, ad set or ad.
+_ACCOUNT_OR_OBJECT = {"ad_account_id", "object_id"}
+
 # The literal "keep" means "leave the current value rule set" on update_ad_set (ADS-38).
 _ID_KEYWORDS = {"value_rule_set_id": {"keep"}}
 
@@ -50,6 +54,11 @@ def _id_problem(name: str, value: str) -> Optional[str]:
             f"{name} must be a plain Meta ID (letters, digits and '_' only). "
             "IDs are used as one URL path segment, so '/', '?', '#', '&', '.' and spaces are refused."
         )
+    if lowered not in _ACCOUNT_OR_OBJECT and (value.lower().startswith("act_") or value.lower() == "me"):
+        # ADS-64: an account or "me" in, say, campaign_id would point the call at
+        # the ad account or the user (update_campaign(campaign_id="act_1",
+        # spend_cap=...) would set the account's spend cap).
+        return f"{name} must be the ID of that object, not an ad account (act_...) or 'me'."
     return None
 
 

@@ -53,7 +53,13 @@ def test_update_status_never_deletes_or_archives(value):
     assert sent is None and "never deletes or archives" in error
 
 
-@pytest.mark.parametrize("value", ["", "LIVE", "INHERITED_FROM_SOURCE"])
+@pytest.mark.parametrize("value", ["", "   "])
+def test_update_status_empty_means_unchanged(value):
+    # ADS-66: strict-schema clients send "" for fields they aren't using.
+    assert status_policy.update_status(value) == (None, None)
+
+
+@pytest.mark.parametrize("value", ["LIVE", "INHERITED_FROM_SOURCE"])
 def test_update_status_refuses_other_values(value):
     sent, error = status_policy.update_status(value)
     assert sent is None and "ACTIVE or PAUSED" in error

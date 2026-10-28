@@ -27,7 +27,7 @@ NO_DELETE_OR_ARCHIVE = (
     "deleting or archiving is done by the account owner in Ads Manager."
 )
 
-UPDATE_STATUS_INVALID = "status must be ACTIVE or PAUSED. Leave it out to keep the current status."
+UPDATE_STATUS_INVALID = "status must be ACTIVE or PAUSED. Leave it out (or pass \"\") to keep the current status."
 
 
 def create_status(status: Any) -> Tuple[Optional[str], Optional[str]]:
@@ -39,10 +39,16 @@ def create_status(status: Any) -> Tuple[Optional[str], Optional[str]]:
 
 
 def update_status(status: Any) -> Tuple[Optional[str], Optional[str]]:
-    """Return (status_to_send, error). None means "don't change the status"."""
+    """Return (status_to_send, error). None means "don't change the status".
+
+    Missing, null and "" all mean "leave the status as it is": strict-schema
+    clients send "" or null for fields they aren't using (ADS-66).
+    """
     if status is None:
         return None, None
     text = str(status).strip().upper()
+    if text == "":
+        return None, None
     if text in ("DELETED", "ARCHIVED"):
         return None, NO_DELETE_OR_ARCHIVE
     if text not in _UPDATE_STATUSES:

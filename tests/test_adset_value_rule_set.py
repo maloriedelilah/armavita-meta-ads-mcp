@@ -197,3 +197,16 @@ def test_update_ad_set_over_mcp_all_optionals_null_is_refused_not_detached():
 
     mock_api.assert_not_called()
     assert "value_rule_set_id is null" in str(result)
+
+
+@pytest.mark.asyncio
+async def test_null_refusal_names_keep_for_strict_clients():
+    # ADS-66: a strict-schema client can't leave the field out, so the message offers "keep".
+    with patch(_PATCH_TARGET, new_callable=AsyncMock) as mock_api:
+        raw = await update_ad_set(ad_set_id="1", meta_access_token="token", value_rule_set_id=None)
+
+    mock_api.assert_not_called()
+    reply = json.loads(raw)
+    if "data" in reply:
+        reply = json.loads(reply["data"])
+    assert '(or pass "keep")' in reply["error"]
