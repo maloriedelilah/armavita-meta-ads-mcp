@@ -15,6 +15,7 @@
 
 ### Fixed
 
+- **The Meta token is sent only in the `Authorization: Bearer` header (ADS-44, security).** It used to travel as an `access_token` query parameter (GET/DELETE) or form field (POST). That way it could end up in URLs, proxy logs and exception messages. Any token-named key in a tool's params is dropped. Graph honours the header: probed Oct 28, a fake bearer gets error 190 "Cannot parse access token", while no token gets 2500.
 - **Review follow-ups (ADS-64, ADS-66).**
   - Outside `ad_account_id` and `object_id`, ID arguments refuse `act_…` and `me`, so an object call can't be pointed at the ad account or the user. Before, `update_campaign(campaign_id="act_123", spend_cap=…)` would have set the account's spend cap.
   - `update_*` treat `status=""` as "unchanged".
