@@ -8,6 +8,7 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 from . import auth_state as auth
+from . import status_policy
 from .graph_client import McpToolError, make_api_request, meta_api_tool
 from .mcp_runtime import mcp_server
 from mcp.types import ToolAnnotations
@@ -313,6 +314,9 @@ async def clone_campaign(
     migrate_to_advantage_plus: Optional[bool] = None,
 ) -> str:
     """Duplicate a campaign using Meta's local Graph copy edge."""
+    new_status, status_error = status_policy.create_status(new_status)
+    if status_error:
+        return json.dumps({"error": status_error}, indent=2)
     return await _forward_duplication_request(
         "campaign",
         campaign_id,
@@ -344,6 +348,9 @@ async def clone_ad_set(
     new_status: Optional[str] = "PAUSED",
 ) -> str:
     """Duplicate an ad set using Meta's local Graph copy edge."""
+    new_status, status_error = status_policy.create_status(new_status)
+    if status_error:
+        return json.dumps({"error": status_error}, indent=2)
     return await _forward_duplication_request(
         "adset",
         ad_set_id,
@@ -372,6 +379,9 @@ async def clone_ad(
     new_status: Optional[str] = "PAUSED",
 ) -> str:
     """Duplicate an ad using Meta's local Graph copy edge."""
+    new_status, status_error = status_policy.create_status(new_status)
+    if status_error:
+        return json.dumps({"error": status_error}, indent=2)
     return await _forward_duplication_request(
         "ad",
         ad_id,

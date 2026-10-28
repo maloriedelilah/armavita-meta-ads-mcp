@@ -17,7 +17,7 @@ It is built for local MCP clients (Claude Code, Cursor, Codex) and supports:
 - `mcp[cli]==1.27.2`
 - Meta Marketing API `v25.0` by default (`META_GRAPH_API_VERSION` override supported)
 
-Current contract version: `1.2.0` (**80 tools**).
+Current contract version: `1.2.0` (**78 tools**).
 
 The default OAuth scope (`META_AUTH_SCOPE`) requests `ads_management`, `ads_read`, `business_management`, `public_profile`, `pages_show_list`, `pages_read_engagement`, `instagram_basic`, and `threads_business_basic`. The catalog tools additionally require `catalog_management` — add it to `META_AUTH_SCOPE` if you use them.
 
@@ -104,7 +104,7 @@ Beyond the core auth variables above, the server reads four optional knobs:
 | `META_MCP_DR_CAMPAIGN_SCAN_LIMIT` | `10` | Number of ad accounts whose campaigns are scanned by `search_web_content` research queries. |
 | `META_MCP_DISABLE_DELIVERY_FALLBACK` | `1` | Set to `0` to let `estimate_audience_size` fall back to the `delivery_estimate` edge when `reachestimate` returns an error. |
 
-## Tool Coverage (80 tools)
+## Tool Coverage (78 tools)
 
 ### Accounts & controls
 - `list_ad_accounts`, `read_ad_account`, `get_account_controls`, `update_account_controls`, `list_account_pages`, `search_pages`
@@ -131,13 +131,13 @@ Beyond the core auth variables above, the server reads four optional knobs:
 - Attach with `value_rule_set_id` on `create_ad_set` / `update_ad_set` (empty string on update detaches); `read_ad_set` and `list_ad_sets` return it
 
 ### Custom conversions
-- `list_custom_conversions`, `read_custom_conversion`, `create_custom_conversion`, `update_custom_conversion`, `delete_custom_conversion`
+- `list_custom_conversions`, `read_custom_conversion`, `create_custom_conversion`, `update_custom_conversion`
 
 ### Targeting research
 - `search_interests`, `suggest_interests`, `estimate_audience_size`, `search_behaviors`, `search_demographics`, `search_geo_locations`
 
 ### Audiences
-- `list_custom_audiences`, `read_custom_audience`, `create_custom_audience`, `update_custom_audience`, `delete_custom_audience`
+- `list_custom_audiences`, `read_custom_audience`, `create_custom_audience`, `update_custom_audience`
 - `create_lookalike_audience`, `manage_custom_audience_users`
 
 ### Catalogs & products

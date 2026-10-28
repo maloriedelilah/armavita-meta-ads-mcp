@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Removed
+
+- `delete_custom_audience` and `delete_custom_conversion` (ADS-54). This server never deletes anything; the account owner deletes in Ads Manager.
+
 ### Added
 
 - Streamable HTTP transport (`--transport streamable-http`, with `--host`, `--port`, `--path` and repeatable `--allowed-host` for a tunnel's public name). In HTTP mode the Meta token comes only from each request's `Authorization: Bearer` header. It is never cached, and there is no fallback to `META_ACCESS_TOKEN`, the `--login` cache or app credentials. A `meta_access_token` tool argument is refused on every tool, and uvicorn's access log is off. stdio stays the default and is unchanged.
@@ -11,6 +15,11 @@
 
 ### Fixed
 
+- **Status safety (ADS-54).** Following the house rules: everything is built paused, the user reviews before activating, and nothing is deleted.
+  - `create_campaign`, `create_ad_set`, `create_ad` and `clone_campaign`/`clone_ad_set`/`clone_ad` always create PAUSED. A missing, null or `""` status means PAUSED (before, `status=""` replaced the default), and ACTIVE or any other value is refused with a message to activate later through the update tool.
+  - `update_campaign`, `update_ad_set` and `update_ad` accept only ACTIVE or PAUSED (any case) and refuse DELETED and ARCHIVED.
+  - `batch_products` refuses DELETE items.
+  - `destructiveHint` is now true on `batch_products` and `update_account_controls`.
 - `description_text` is now passed through on single video creatives as `video_data.link_description`; it was previously dropped.
 - Removed the client-side 40-character headline and 125-character description checks. Those are Meta's recommended display lengths, not API limits, so valid creatives with longer text were being rejected before reaching the API. Meta still validates and reports genuinely invalid lengths.
 

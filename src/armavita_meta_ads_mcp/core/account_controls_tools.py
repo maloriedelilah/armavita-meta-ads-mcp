@@ -56,7 +56,7 @@ async def get_account_controls(
     return _json(payload)
 
 
-@mcp_server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True))
+@mcp_server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=True))
 @meta_api_tool
 async def update_account_controls(
     ad_account_id: str,
