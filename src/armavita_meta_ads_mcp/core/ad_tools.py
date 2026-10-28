@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from mcp.server.fastmcp import Image
 from PIL import Image as PILImage
 
+from . import status_policy
 from .graph_client import McpToolError, make_api_request, meta_api_tool
 from .mcp_runtime import mcp_server
 from mcp.types import ToolAnnotations
@@ -618,6 +619,9 @@ async def create_ad(
     status. `conversion_domain` is required for some website-conversion ads;
     `bid_amount` (minor units) and `tracking_specs` are optional.
     """
+    status, status_error = status_policy.create_status(status)
+    if status_error:
+        return _json({"error": status_error})
     if not ad_account_id:
         return _json({"error": "No account ID provided"})
     if not name:
@@ -760,6 +764,9 @@ async def update_ad(
     (text/image/URL), build a new creative with create_ad_creative first, then
     pass its id here.
     """
+    status, status_error = status_policy.update_status(status)
+    if status_error:
+        return _json({"error": status_error})
     if not ad_id:
         return _json({"error": "Ad ID is required"})
 

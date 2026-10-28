@@ -15,6 +15,7 @@ Surfaces:
 import json
 from typing import Any, Dict, List, Optional
 
+from . import status_policy
 from .graph_client import make_api_request, meta_api_tool
 from .mcp_runtime import mcp_server
 from mcp.types import ToolAnnotations
@@ -117,7 +118,7 @@ async def upsert_product(
     return _json(result)
 
 
-@mcp_server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True))
+@mcp_server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True))
 @meta_api_tool
 async def batch_products(
     product_catalog_id: str,
@@ -125,15 +126,18 @@ async def batch_products(
     meta_access_token: Optional[str] = None,
     allow_upsert: bool = True,
 ) -> str:
-    """Bulk create/update/delete catalog items via items_batch (30 MB / 5,000 items).
+    """Bulk create/update catalog items via items_batch (30 MB / 5,000 items).
 
     Each entry in `requests` is a Meta Items Batch request, e.g.:
     `{"method": "UPDATE", "retailer_id": "SKU123", "data": {"price": "1299 USD", ...}}`.
+    DELETE requests are refused: this server never deletes anything.
     """
     if not str(product_catalog_id or "").strip():
         return _json({"error": "product_catalog_id is required"})
     if not requests:
         return _json({"error": "requests list is required"})
+    if any(isinstance(item, dict) and str(item.get("method", "")).strip().upper() == "DELETE" for item in requests):
+        return _json({"error": status_policy.NO_DELETE_OR_ARCHIVE})
     if len(requests) > 5000:
         return _json({"error": "items_batch supports up to 5000 items per request"})
 

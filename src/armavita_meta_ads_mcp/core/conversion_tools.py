@@ -147,17 +147,3 @@ async def update_custom_conversion(
 
     result = await make_api_request(custom_conversion_id, meta_access_token, payload, method="POST")
     return _json(result)
-
-
-@mcp_server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True))
-@meta_api_tool
-async def delete_custom_conversion(
-    custom_conversion_id: str,
-    meta_access_token: Optional[str] = None,
-) -> str:
-    """Archive/delete a custom conversion."""
-    if not custom_conversion_id:
-        return _json({"error": "custom_conversion_id is required"})
-
-    result = await make_api_request(custom_conversion_id, meta_access_token, {}, method="DELETE")
-    return _json(result)

@@ -45,7 +45,6 @@ from .account_controls_tools import get_account_controls, update_account_control
 from .audience_tools import (
     create_custom_audience,
     create_lookalike_audience,
-    delete_custom_audience,
     list_custom_audiences,
     manage_custom_audience_users,
     read_custom_audience,
@@ -61,7 +60,6 @@ from .catalog_tools import (
 )
 from .conversion_tools import (
     create_custom_conversion,
-    delete_custom_conversion,
     list_custom_conversions,
     read_custom_conversion,
     update_custom_conversion,
@@ -140,7 +138,6 @@ __all__ = [
     "read_custom_audience",
     "create_custom_audience",
     "update_custom_audience",
-    "delete_custom_audience",
     "manage_custom_audience_users",
     "create_lookalike_audience",
     "send_capi_events",
@@ -156,7 +153,6 @@ __all__ = [
     "read_custom_conversion",
     "create_custom_conversion",
     "update_custom_conversion",
-    "delete_custom_conversion",
     "create_insights_job",
     "read_insights_job",
     "read_insights_job_results",

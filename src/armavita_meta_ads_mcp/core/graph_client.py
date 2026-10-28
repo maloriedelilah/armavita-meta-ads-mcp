@@ -15,6 +15,7 @@ import httpx
 
 from . import auth_state as auth
 from . import http_mode
+from . import id_validation
 from .auth_state import auth_manager
 from .graph_constants import META_GRAPH_API_BASE, META_GRAPH_API_VERSION
 from .media_helpers import USER_AGENT, logger
@@ -128,9 +129,17 @@ def _sanitize_url(raw_url: str) -> str:
 
 
 def _sanitize_response_payload(value: Any) -> Any:
-    """Recursively strip access tokens from URL-like response values."""
+    """Recursively strip access tokens from responses.
+
+    Removes `access_token=` from URL-like strings, and redacts any field whose
+    name contains `access_token` (e.g. Page tokens from `me/accounts`), so a
+    token never reaches a tool result or the transcript.
+    """
     if isinstance(value, dict):
-        return {key: _sanitize_response_payload(item) for key, item in value.items()}
+        return {
+            key: ("***REDACTED***" if "access_token" in str(key).lower() else _sanitize_response_payload(item))
+            for key, item in value.items()
+        }
 
     if isinstance(value, list):
         return [_sanitize_response_payload(item) for item in value]
@@ -161,6 +170,11 @@ async def make_api_request(
                 "action_required": "Run the login flow (or set META_ACCESS_TOKEN) and retry",
             }
         }
+
+    path_problem = id_validation.endpoint_problem(endpoint)
+    if path_problem:
+        # Backstop for ADS-53: never let ?, #, &, . or .. in an ID reshape the request.
+        return {"error": {"message": path_problem}}
 
     url = f"{META_GRAPH_API_BASE}/{endpoint}"
     request_params = _normalize_request_params(params, meta_access_token)
@@ -311,6 +325,10 @@ def meta_api_tool(func):
         try:
             safe_kwargs = {k: ("***TOKEN***" if k == "meta_access_token" else v) for k, v in kwargs.items()}
             logger.debug("Tool call name=%s kwargs=%s", func.__name__, safe_kwargs)
+
+            argument_problem = id_validation.argument_problem(kwargs)
+            if argument_problem:
+                return json.dumps({"error": {"message": argument_problem}}, indent=2)
 
             if not kwargs.get("meta_access_token"):
                 token = await auth.get_current_access_token()
