@@ -199,7 +199,7 @@ class CallbackHandler(BaseHTTPRequestHandler):
                     + "</p></body></html>"
                 )
         except Exception as exc:  # noqa: BLE001
-            logger.exception("OAuth completion callback failed: %s", exc)
+            logger.error("OAuth completion callback failed: %s", type(exc).__name__)
             token_container.update(
                 {
                     "status": "error",
@@ -237,7 +237,7 @@ def _server_loop(port: int) -> None:
         logger.info("Callback server listening on http://localhost:%s", port)
         httpd.serve_forever()
     except Exception as exc:  # noqa: BLE001
-        logger.exception("Callback server loop crashed: %s", exc)
+        logger.error("Callback server loop crashed: %s", type(exc).__name__)
 
 
 
@@ -259,7 +259,7 @@ def shutdown_callback_server() -> None:
                 _callback_httpd.shutdown()
                 _callback_httpd.server_close()
             except Exception as exc:  # noqa: BLE001
-                logger.warning("Error while closing callback server: %s", exc)
+                logger.warning("Error while closing callback server: %s", type(exc).__name__)
 
         if _callback_thread is not None and _callback_thread.is_alive():
             _callback_thread.join(timeout=3)

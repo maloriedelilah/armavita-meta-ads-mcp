@@ -568,7 +568,7 @@ async def update_ad_set(
                 "error": (
                     "value_rule_set_id is null. Nothing was changed. Pass \"\" to detach the "
                     "ad set's value rule set, a value rule set ID to attach one, or leave the "
-                    "field out to keep the current one."
+                    "field out (or pass \"keep\") to keep the current one."
                 )
             }
         )
