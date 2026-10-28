@@ -4,7 +4,8 @@
 
 ### Added
 
-- `list_value_rule_sets` and `read_value_rule_set`: read an ad account's value rule sets (`act_<id>/value_rule_set`) and the rules inside a set. Read-only; attaching a set to an ad set is not covered yet.
+- `list_value_rule_sets` and `read_value_rule_set`: read an ad account's value rule sets (`act_<id>/value_rule_set`) and the rules inside a set.
+- `create_ad_set` and `update_ad_set` accept `value_rule_set_id` to attach a value rule set; on `update_ad_set` an empty string detaches it. `read_ad_set` and `list_ad_sets` now return `value_rule_set_id`.
 - `create_ad_creative` accepts `display_link`, the display URL shown under single image and video ads (sent as `link_data.caption` for images and `call_to_action.value.link_caption` for videos).
 
 ### Fixed
