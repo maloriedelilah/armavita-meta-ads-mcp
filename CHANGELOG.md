@@ -11,6 +11,12 @@
 
 ### Fixed
 
+- **`--login` no longer writes secrets to server.log (ADS-55, security).**
+  - The token exchanges POST the app secret, auth code and short-lived token in the body, not the URL.
+  - Failures log only the exception type, the HTTP status and Graph's error code. Before, a network error logged the full URL with `client_secret` and `code`.
+  - Only Graph code 190 on the cached login token clears the login. Before, any permission error (10) or code 102 deleted it.
+  - The OAuth callback ignores `?error=` unless it carries this login's state, and prints callback text without control characters.
+  - The unused `AuthManager.authenticate()`, which logged the full login URL, is removed.
 - `description_text` is now passed through on single video creatives as `video_data.link_description`; it was previously dropped.
 - Removed the client-side 40-character headline and 125-character description checks. Those are Meta's recommended display lengths, not API limits, so valid creatives with longer text were being rejected before reaching the API. Meta still validates and reports genuinely invalid lengths.
 

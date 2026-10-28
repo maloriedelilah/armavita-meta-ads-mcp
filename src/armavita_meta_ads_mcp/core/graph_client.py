@@ -223,7 +223,10 @@ async def make_api_request(
                     await asyncio.sleep(delay)
                     continue
 
-                if code in {190, 102, 10}:
+                # Only an invalid/expired token (190) logs the stdio user out, and
+                # only when it is the cached login token that failed. 10 and 102
+                # are ordinary permission/session errors on one call (ADS-55).
+                if code == 190 and meta_access_token and meta_access_token == auth_manager.get_access_token():
                     auth_manager.invalidate_token()
 
                 error_message = error_obj.get("message") or error_obj.get("primary_text", "")
