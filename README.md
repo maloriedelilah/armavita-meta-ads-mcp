@@ -84,6 +84,13 @@ Login flow:
 armavita-meta-ads-mcp --login
 ```
 
+Remote (HTTP) connector, for clients that can't start a local process. It needs a shared secret and a tunnel; see the [HTTP mode guide](docs/http-mode.md):
+
+```bash
+ARMAVITA_MCP_SHARED_SECRET="$(cat ~/.config/armavita-meta-ads-mcp/http-secret)" \
+  armavita-meta-ads-mcp --transport streamable-http --host 127.0.0.1 --port 8765 --allowed-host mcp.example.com
+```
+
 ## Quick MCP Client Config
 
 Minimal MCP server registration (JSON format used by many clients):
@@ -277,11 +284,20 @@ Responses preserve Meta's native `paging` object.
 ## Security
 
 - Access tokens are redacted from URL fields returned by the server (including nested `paging.next` URLs).
+- The Meta token is sent to Graph only in the `Authorization: Bearer` header, never in a URL or form body.
+- Logs pass through a filter that removes tokens and the HTTP shared secret.
+- In HTTP mode:
+  - every request needs the `X-Armavita-Key` shared secret, checked in constant time;
+  - the Meta token comes only from that request's own header;
+  - request bodies are capped at 44 MiB;
+  - the host's files and network are never exposed to callers.
+  See [docs/http-mode.md](docs/http-mode.md).
 
 ## Docs
 
 - [Authentication Setup Guide](docs/auth-setup.md)
 - [Local Client Guide](docs/local-client-guide.md)
+- [HTTP Mode (remote connector) Guide](docs/http-mode.md)
 - [Security Policy](SECURITY.md)
 
 ## Scope

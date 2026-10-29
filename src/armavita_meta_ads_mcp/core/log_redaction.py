@@ -27,6 +27,8 @@ _PATTERNS = (
     (re.compile(r"(?i)(access_token=)[^&\s'\"<>]+"), r"\1" + REDACTED),
     # "access_token": "..." / 'access_token': '...' in reprs and JSON
     (re.compile(r"""(?i)(['"]?(?:meta_)?access_token['"]?\s*[:=]\s*['"]?)[^'"\s,}&]+"""), r"\1" + REDACTED),
+    # The HTTP-mode shared secret (ADS-46), in header dicts, ASGI header tuples and "name: value" lines
+    (re.compile(r"""(?i)(x-armavita-key['"]?\s*[:=,]\s*b?['"]?)[^'"\s,})&]+"""), r"\1" + REDACTED),
     # Meta user/page/system-user tokens on their own: "EAA" followed by a long run
     (re.compile(r"\bEAA[A-Za-z0-9]{20,}"), REDACTED),
 )

@@ -8,6 +8,12 @@
 
 ### Added
 
+- **HTTP mode guard (ADS-46, security).**
+  - Every request needs an `X-Armavita-Key` header matching `ARMAVITA_MCP_SHARED_SECRET`. The comparison is constant-time over SHA-256 digests, and a mismatch gets a 401 before the MCP SDK sees the request.
+  - The server refuses to start in HTTP mode without a secret of at least 32 characters. `--no-shared-secret` is for local tests only: it's refused on a non-loopback host or with `--allowed-host`.
+  - Request bodies are capped at 44 MiB (the largest image upload plus JSON). The cap is checked against Content-Length and while a chunked body streams in, and either way the reply is a 413.
+  - The shared secret is redacted from logs.
+  - New guide, [docs/http-mode.md](docs/http-mode.md): the start command, Cloudflare Tunnel versus Claude MCP tunnels, connector headers and rotation.
 - Streamable HTTP transport (`--transport streamable-http`, with `--host`, `--port`, `--path` and repeatable `--allowed-host` for a tunnel's public name). In HTTP mode the Meta token comes only from each request's `Authorization: Bearer` header. It is never cached, and there is no fallback to `META_ACCESS_TOKEN`, the `--login` cache or app credentials. A `meta_access_token` tool argument is refused on every tool, and uvicorn's access log is off. stdio stays the default and is unchanged.
 - `list_value_rule_sets` and `read_value_rule_set`: read an ad account's value rule sets (`act_<id>/value_rule_set`) and the rules inside a set (each rule's name, adjustment and status; Meta does not return the condition a rule matches).
 - `create_ad_set` and `update_ad_set` accept `value_rule_set_id` to attach a value rule set; on `update_ad_set` an empty string detaches it. `read_ad_set` and `list_ad_sets` now return `value_rule_set_id`.
