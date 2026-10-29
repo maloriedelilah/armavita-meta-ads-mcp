@@ -196,3 +196,24 @@ def test_callback_failures_log_only_the_exception_type():
     source = Path(oauth_callback_server.__file__).read_text()
     assert "logger.exception(" not in source
     assert ", exc)" not in source
+
+
+def test_token_cache_folder_is_made_private_only_when_a_token_is_saved(tmp_path, monkeypatch):
+    """No folder at import or on read; on save, the folder is 0700 and the file 0600."""
+    import os
+    import stat
+
+    from armavita_meta_ads_mcp.core import auth_state
+
+    if os.name != "posix":
+        pytest.skip("chmod semantics")
+    cache = tmp_path / "cfg" / "armavita-meta-ads-mcp" / "token_cache.json"
+    manager = auth_state.auth_manager
+    monkeypatch.setattr(manager, "_cache_path", lambda: cache)
+    assert manager._load_cached_token() is False
+    assert not cache.parent.exists()
+
+    monkeypatch.setattr(manager, "token_info", auth_state.TokenInfo(meta_access_token="EAA" + "x" * 40))
+    manager._persist_token()
+    assert stat.S_IMODE(os.stat(cache.parent).st_mode) == 0o700
+    assert stat.S_IMODE(os.stat(cache).st_mode) == 0o600

@@ -192,9 +192,11 @@ def test_server_log_is_private_from_creation(tmp_path):
     old = tmp_path / "old.log"
     old.write_text("")
     os.chmod(old, 0o644)
-    for path in (fresh, old):
+    nested = tmp_path / "new-dir" / "server.log"  # the folder is made when the file is first opened
+    for path in (fresh, old, nested):
         handler = media_helpers._PrivateFileHandler(path, encoding="utf-8", delay=True)
         assert not path.exists() or path == old  # delay=True: nothing created until a record arrives
+        assert path != nested or not nested.parent.exists()
         handler.emit(logging.makeLogRecord({"msg": "hello"}))
         handler.close()
         assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
@@ -221,3 +223,4 @@ def test_http_startup_never_creates_server_log(tmp_path):
     assert "http_mode_start" in result.stderr  # the startup lines went to stderr...
     assert not list(tmp_path.rglob("server.log"))  # ...and no log file was created
     assert secret not in result.stderr
+    assert not (tmp_path / ".config" / "armavita-meta-ads-mcp").exists()  # nor its folder

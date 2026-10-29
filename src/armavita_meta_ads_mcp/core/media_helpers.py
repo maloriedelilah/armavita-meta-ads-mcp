@@ -32,15 +32,16 @@ def _resolve_log_file() -> pathlib.Path:
     else:
         root = pathlib.Path.home() / ".config"
 
-    log_dir = root / PACKAGE_NAME
-    log_dir.mkdir(parents=True, exist_ok=True)
-    return log_dir / "server.log"
+    # No mkdir here: this runs at import, and in HTTP mode nothing should be created on
+    # the host (Errata, #16 nit). The handler makes the folder when it first opens the file.
+    return root / PACKAGE_NAME / "server.log"
 
 
 class _PrivateFileHandler(logging.FileHandler):
     """A FileHandler whose file is owner-only (0600) from the moment it exists (ADS-45)."""
 
     def _open(self):
+        os.makedirs(os.path.dirname(self.baseFilename), mode=0o700, exist_ok=True)
         fd = os.open(self.baseFilename, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         try:
             os.chmod(self.baseFilename, 0o600)  # an older server.log may still be 0644
