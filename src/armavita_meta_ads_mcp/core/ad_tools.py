@@ -12,10 +12,10 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from mcp.server.fastmcp import Image
-from PIL import Image as PILImage
 
 from . import status_policy
 from . import http_mode
+from . import image_limits
 from .graph_client import McpToolError, make_api_request, meta_api_tool
 from .mcp_runtime import mcp_server
 from mcp.types import ToolAnnotations
@@ -289,7 +289,8 @@ def _decode_json_if_string(value: Any) -> Any:
 
 
 def _build_image_from_bytes(raw: bytes) -> Image:
-    image = PILImage.open(io.BytesIO(raw))
+    # ADS-62: only JPEG/PNG/WEBP/GIF, size and pixel caps; raises image_limits.ImageRejected.
+    image = image_limits.open_image(raw)
     if image.mode != "RGB":
         image = image.convert("RGB")
     buffer = io.BytesIO()
@@ -884,14 +885,21 @@ async def upload_ad_image_asset(
                 inferred_name = f"upload{extension}"
         elif not http_mode.is_enabled() and os.path.isfile(image_file_path):
             # ADS-50: in HTTP mode the host's filesystem is never read; the value is base64.
-            with open(image_file_path, "rb") as image_fh:
-                encoded_image = base64.b64encode(image_fh.read()).decode("utf-8")
+            try:
+                encoded_image = base64.b64encode(image_limits.read_capped(image_file_path, image_limits.MAX_IMAGE_BYTES)).decode("utf-8")
+            except image_limits.ImageRejected:
+                return _json({"error": image_limits.TOO_LARGE})
             if not inferred_name:
                 inferred_name = os.path.basename(image_file_path)
         else:
             encoded_image = image_file_path.strip()
             if not inferred_name:
                 inferred_name = "upload.png"
+        # ADS-62: cap the size, and never send a path that isn't a file to Meta as if it were image bytes.
+        try:
+            encoded_image = image_limits.decode_base64_image(encoded_image)
+        except image_limits.ImageRejected as exc:
+            return _json({"error": str(exc)})
     else:
         try:
             image_bytes = await try_multiple_download_methods(image_source_url)
@@ -1016,8 +1024,17 @@ async def upload_ad_video_asset(
     if video_source_url:
         api_payload["file_url"] = video_source_url
     elif video_file_path and os.path.isfile(video_file_path):
-        with open(video_file_path, "rb") as video_fh:
-            files = {"source": (os.path.basename(video_file_path), video_fh.read(), "video/mp4")}
+        # ADS-62: the file is sent in one request, so it's read into memory; cap it first.
+        try:
+            video_bytes = image_limits.read_capped(video_file_path, image_limits.MAX_VIDEO_FILE_BYTES)
+        except image_limits.ImageRejected:
+            return _json(
+                {
+                    "error": "The video is larger than 1 GB, the most this tool uploads in one request. "
+                    "Host it at a public URL and pass video_source_url, so Meta fetches it."
+                }
+            )
+        files = {"source": (os.path.basename(video_file_path), video_bytes, "video/mp4")}
     else:
         return _json({"error": "video_file_path must be a readable local file path"})
 

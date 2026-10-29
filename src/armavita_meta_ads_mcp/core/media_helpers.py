@@ -187,13 +187,13 @@ async def download_image(url: str) -> Optional[bytes]:
         "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
     }
 
+    from .image_limits import fetch_capped
+
     try:
-        async with httpx.AsyncClient(follow_redirects=_follow_redirects(), timeout=30.0) as client:
-            response = await client.get(url, headers=headers)
-            response.raise_for_status()
-            return response.content
+        # ADS-62: streamed, capped at Meta's image size, with one overall deadline.
+        return await fetch_capped(url, headers, follow_redirects=_follow_redirects())
     except Exception as exc:  # noqa: BLE001
-        logger.warning("image_download_failed url=%s error=%s", url, exc)
+        logger.warning("image_download_failed url=%s error=%s", url, type(exc).__name__)
         return None
 
 
@@ -221,13 +221,23 @@ async def try_multiple_download_methods(url: str) -> Optional[bytes]:
         },
     ]
 
+    import time
+
+    from .image_limits import DOWNLOAD_DEADLINE_SECONDS, ImageRejected, fetch_capped
+
+    # ADS-62: one deadline for all attempts together, and no retry once a response is too big.
+    give_up_at = time.monotonic() + DOWNLOAD_DEADLINE_SECONDS
     for profile in header_profiles:
+        remaining = give_up_at - time.monotonic()
+        if remaining <= 0:
+            logger.warning("image_download_failed url=%s error=deadline", url)
+            break
         try:
-            async with httpx.AsyncClient(follow_redirects=_follow_redirects(), timeout=30.0) as client:
-                response = await client.get(url, headers=profile)
-                response.raise_for_status()
-                return response.content
+            return await fetch_capped(url, profile, follow_redirects=_follow_redirects(), deadline=remaining)
+        except ImageRejected:
+            logger.warning("image_download_refused url=%s reason=too_large", url)
+            break
         except Exception as exc:  # noqa: BLE001
-            logger.debug("image_download_attempt_failed url=%s ua=%s error=%s", url, profile.get("User-Agent"), exc)
+            logger.debug("image_download_attempt_failed url=%s ua=%s error=%s", url, profile.get("User-Agent"), type(exc).__name__)
 
     return None
