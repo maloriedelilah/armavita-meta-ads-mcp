@@ -374,5 +374,4 @@ def meta_api_tool(func):
     return wrapper
 
 
-logger.info("Core API initialized using Graph version %s", META_GRAPH_API_VERSION)
-logger.info("META_APP_ID configured: %s", "yes" if os.environ.get("META_APP_ID") else "no")
+# Startup lines are logged by media_helpers.log_startup_config() once the log destination is known (ADS-45).
