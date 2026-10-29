@@ -131,14 +131,9 @@ class AuthManager:
             base = pathlib.Path.home() / "Library" / "Application Support"
         else:
             base = pathlib.Path.home() / ".config"
-        cache_dir = base / "armavita-meta-ads-mcp"
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        # Restrict the dir holding the long-lived token to the owner (no-op on Windows).
-        try:
-            os.chmod(cache_dir, 0o700)
-        except OSError:
-            pass
-        return cache_dir / "token_cache.json"
+        # Only the path: reading needs no folder, and this runs at import, where HTTP mode
+        # must create nothing on the host. _persist_token makes the folder when it writes.
+        return base / "armavita-meta-ads-mcp" / "token_cache.json"
 
     def _load_cached_token(self) -> bool:
         path = self._cache_path()
@@ -160,6 +155,12 @@ class AuthManager:
         if not self.token_info:
             return
         path = self._cache_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Restrict the dir holding the long-lived token to the owner (no-op on Windows).
+        try:
+            os.chmod(path.parent, 0o700)
+        except OSError:
+            pass
         data = json.dumps(self.token_info.serialize())
         # Write the access token with owner-only permissions (0600). Opening with
         # O_CREAT|0o600 sets the mode on creation; chmod re-tightens a pre-existing file.
