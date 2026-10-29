@@ -222,5 +222,5 @@ def test_http_startup_never_creates_server_log(tmp_path):
     assert result.returncode == 0, result.stderr
     assert "http_mode_start" in result.stderr  # the startup lines went to stderr...
     assert not list(tmp_path.rglob("server.log"))  # ...and no log file was created
-    assert secret not in result.stderr
     assert not (tmp_path / ".config" / "armavita-meta-ads-mcp").exists()  # nor its folder
+    assert secret not in result.stderr
