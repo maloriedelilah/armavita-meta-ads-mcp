@@ -20,6 +20,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from .image_limits import MAX_IMAGE_BASE64_CHARS
@@ -27,6 +28,7 @@ from .image_limits import MAX_IMAGE_BASE64_CHARS
 SECRET_ENV = "ARMAVITA_MCP_SHARED_SECRET"
 SECRET_HEADER = "x-armavita-key"
 MIN_SECRET_LENGTH = 32
+_SECRET_CHARS = re.compile(r"[A-Za-z0-9_-]+")
 MAX_BODY_BYTES = MAX_IMAGE_BASE64_CHARS + 4 * 1024 * 1024
 # Across all requests at once: bodies being read or held for the app. Two full-size uploads
 # fit; past that, new requests get 503 until memory frees up (Errata, ADS-46 Low).
@@ -57,8 +59,11 @@ def secret_problem(secret: Optional[str]) -> Optional[str]:
         )
     if len(secret) < MIN_SECRET_LENGTH:
         return f"{SECRET_ENV} is shorter than {MIN_SECRET_LENGTH} characters. Use a longer random value."
-    if any(ch.isspace() or not ch.isprintable() for ch in secret):
-        return f"{SECRET_ENV} contains whitespace or control characters, which can't travel in a header."
+    if not _SECRET_CHARS.fullmatch(secret):
+        # Letters, digits, '-' and '_' only (what secrets.token_urlsafe makes). Quotes and
+        # backslashes would be escaped in reprs, and the escaped form would slip past
+        # literal redaction (Errata, ADS-46 round 2).
+        return f"{SECRET_ENV} may contain only letters, digits, '-' and '_'."
     return None
 
 

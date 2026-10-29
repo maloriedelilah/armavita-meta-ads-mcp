@@ -30,11 +30,11 @@ In HTTP mode:
 Generate it straight into a file only you can read, so it never appears in your shell history or on screen:
 
 ```bash
-mkdir -p ~/.config/armavita-meta-ads-mcp
-( umask 077 && python3 -c 'import secrets; print(secrets.token_urlsafe(32))' > ~/.config/armavita-meta-ads-mcp/http-secret )
+( umask 077 && mkdir -p ~/.config/armavita-meta-ads-mcp && \
+  python3 -c 'import secrets; print(secrets.token_urlsafe(32))' > ~/.config/armavita-meta-ads-mcp/http-secret )
 ```
 
-The server refuses to start in HTTP mode without a secret of at least 32 characters.
+The server refuses to start in HTTP mode without a secret of at least 32 characters, made only of letters, digits, `-` and `_`. `secrets.token_urlsafe` produces exactly that.
 
 ## 2. Start the server
 
