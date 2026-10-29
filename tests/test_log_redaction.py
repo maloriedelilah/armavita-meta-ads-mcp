@@ -214,7 +214,10 @@ def test_http_startup_never_creates_server_log(tmp_path):
     )
     env = {**os.environ, "HOME": str(tmp_path), "APPDATA": str(tmp_path), "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")}
     env.pop("META_ACCESS_TOKEN", None)
+    secret = "startup-test-secret-" + "q" * 24
+    env["ARMAVITA_MCP_SHARED_SECRET"] = secret  # ADS-46: HTTP mode refuses to start without one
     result = subprocess.run([sys.executable, "-c", script], env=env, capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr
     assert "http_mode_start" in result.stderr  # the startup lines went to stderr...
     assert not list(tmp_path.rglob("server.log"))  # ...and no log file was created
+    assert secret not in result.stderr

@@ -6,12 +6,13 @@
 import argparse
 import logging
 import os
+import sys
 from typing import Any, List, Optional
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 
-from . import http_mode, log_redaction
+from . import http_guard, http_mode, log_redaction
 from .auth_state import login as login_auth
 from .media_helpers import log_startup_config, logger
 
@@ -140,12 +141,26 @@ def configure_http(host: str, port: int, allowed_hosts: Optional[List[str]] = No
             security.allowed_origins.append(origin)
 
 
-def _run_streamable_http(host: str, port: int, allowed_hosts: Optional[List[str]], path: str) -> int:
+def build_http_app(shared_secret: Optional[str]):
+    """The MCP app behind the ADS-46 guard (shared secret, body cap). configure_http() must run first."""
+    return http_guard.HttpGuard(mcp_server.streamable_http_app(), shared_secret)
+
+
+def _run_streamable_http(
+    host: str, port: int, allowed_hosts: Optional[List[str]], path: str, shared_secret: Optional[str]
+) -> int:
     import uvicorn
 
     configure_http(host, port, allowed_hosts, path)
-    app = mcp_server.streamable_http_app()
-    logger.info("http_mode_start host=%s port=%s path=%s", host, port, path)
+    app = build_http_app(shared_secret)
+    logger.info(
+        "http_mode_start host=%s port=%s path=%s shared_secret=%s max_body_bytes=%s",
+        host,
+        port,
+        path,
+        "on" if shared_secret else "OFF",
+        http_guard.MAX_BODY_BYTES,
+    )
     # access_log=False: uvicorn's access log is off so request lines and
     # headers are never written by the HTTP layer.
     # ADS-45: the redacting filter goes on every handler that could see a request
@@ -191,6 +206,12 @@ def main() -> int:
         default=[],
         help="HTTP mode: a public host name a tunnel forwards to this server (repeatable), e.g. mcp.example.com",
     )
+    parser.add_argument(
+        "--no-shared-secret",
+        action="store_true",
+        help="HTTP mode: run without the X-Armavita-Key check. Only for a local test with nothing exposed; "
+        "refused unless --host is a loopback address and no --allowed-host is given.",
+    )
 
     args = parser.parse_args()
 
@@ -213,7 +234,22 @@ def main() -> int:
         return 0
 
     if args.transport == "streamable-http":
-        return _run_streamable_http(args.host, args.port, args.allowed_host, args.path)
+        # ADS-46: a shared secret is required unless explicitly waived for a purely local test.
+        if args.no_shared_secret:
+            if args.host not in ("127.0.0.1", "localhost", "::1") or args.allowed_host:
+                print("--no-shared-secret is only allowed on a loopback --host with no --allowed-host.", file=sys.stderr)
+                return 2
+            shared_secret = None
+            logger.warning("http_shared_secret_off reason=--no-shared-secret (local test only)")
+        else:
+            shared_secret = http_guard.secret_from_env()
+            problem = http_guard.secret_problem(shared_secret)
+            if problem:
+                print(problem, file=sys.stderr)
+                return 2
+            # Redact the exact value too, not just after the header name (Errata, ADS-46 Low).
+            log_redaction.register_secret(shared_secret)
+        return _run_streamable_http(args.host, args.port, args.allowed_host, args.path, shared_secret)
 
     return _run_stdio()
 
