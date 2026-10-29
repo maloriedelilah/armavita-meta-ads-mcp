@@ -19,7 +19,10 @@ In HTTP mode:
   - `search_web_content`, `read_web_content` and `export_ad_image_file` aren't offered;
   - image uploads take base64 or a `data:` URL only;
   - `video_file_path` is refused (use `video_source_url`, which Meta fetches itself).
-- **Request bodies are capped at 44 MiB.** That's enough for the largest image upload (30 MB as base64) plus JSON. Larger bodies get a 413 before the server reads them.
+- **Request bodies are capped at 44 MiB.** That's enough for the largest image upload (30 MB as base64) plus JSON.
+  - A larger body gets a 413 before the server reads it.
+  - A body must arrive within 120 seconds, or it gets a 408.
+  - All requests together may hold at most about 96 MiB of body at once; past that, new ones get a 503.
 - **Logs go to stderr only**, through a filter that removes Bearer tokens, `access_token` values, Meta-token-shaped strings and the shared secret. No `server.log` is written, and uvicorn's access log is off.
 
 ## 1. Create the shared secret
@@ -44,7 +47,7 @@ ARMAVITA_MCP_SHARED_SECRET="$(cat ~/.config/armavita-meta-ads-mcp/http-secret)" 
 - `--allowed-host` is the public name the tunnel forwards. The MCP SDK's DNS-rebinding protection refuses any other `Host` header with a 421. Repeat the flag for more than one name.
 - The endpoint is `/mcp` (change it with `--path`).
 
-**For a quick local test with nothing exposed**, `--no-shared-secret` skips the key check. It's refused unless `--host` is loopback and no `--allowed-host` is given.
+**For a quick local test with nothing exposed**, `--no-shared-secret` skips the key check. It's refused unless `--host` is loopback and no `--allowed-host` is given. **Never point a tunnel at a server started this way.** A tunnel that rewrites the `Host` header to `localhost` would get past both checks and make it public with no key.
 
 **To check it:** a request without the key must get a 401:
 
@@ -95,15 +98,26 @@ cloudflared tunnel run armavita-mcp
 
 ## 4. Add the connector
 
-Point the client at `https://mcp.example.com/mcp`, with both headers. For example, in Claude Code:
+Point the client at `https://mcp.example.com/mcp`, with both headers. **Don't put either value on a command line:** it lands in shell history and is visible in the process list. Put them in the client's config file instead. For example, Claude Code's `.mcp.json` expands environment variables in headers:
 
-```bash
-claude mcp add --transport http armavita-meta-ads https://mcp.example.com/mcp \
-  --header "Authorization: Bearer <Meta access token>" \
-  --header "X-Armavita-Key: <shared secret>"
+```json
+{
+  "mcpServers": {
+    "armavita-meta-ads": {
+      "type": "http",
+      "url": "https://mcp.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${META_ACCESS_TOKEN}",
+        "X-Armavita-Key": "${ARMAVITA_MCP_KEY}"
+      }
+    }
+  }
+}
 ```
 
-Every client stores these headers in its own config, so treat that config like a password: owner-only permissions, and keep it out of repositories and chat transcripts.
+Set those two variables in the environment the client starts from. Use `read -rs` to enter them, so they aren't echoed or saved to history.
+
+Every client stores these headers or variables somewhere, so treat that place like a password: owner-only permissions, and keep it out of repositories and chat transcripts.
 
 ## Rotating
 

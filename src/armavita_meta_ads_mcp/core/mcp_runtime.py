@@ -240,6 +240,8 @@ def main() -> int:
             if problem:
                 print(problem, file=sys.stderr)
                 return 2
+            # Redact the exact value too, not just after the header name (Errata, ADS-46 Low).
+            log_redaction.register_secret(shared_secret)
         return _run_streamable_http(args.host, args.port, args.allowed_host, args.path, shared_secret)
 
     return _run_stdio()

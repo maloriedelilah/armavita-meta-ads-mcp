@@ -15,6 +15,7 @@ Two checks, both made before the MCP SDK sees a request:
   largest image upload the tools accept (30 MB as base64) plus JSON.
 """
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -27,6 +28,11 @@ SECRET_ENV = "ARMAVITA_MCP_SHARED_SECRET"
 SECRET_HEADER = "x-armavita-key"
 MIN_SECRET_LENGTH = 32
 MAX_BODY_BYTES = MAX_IMAGE_BASE64_CHARS + 4 * 1024 * 1024
+# Across all requests at once: bodies being read or held for the app. Two full-size uploads
+# fit; past that, new requests get 503 until memory frees up (Errata, ADS-46 Low).
+MAX_BUFFERED_BYTES = 2 * MAX_BODY_BYTES + 8 * 1024 * 1024
+# A body must arrive within this many seconds of the request starting (408 otherwise).
+BODY_DEADLINE_SECONDS = 120.0
 
 Scope = Dict[str, Any]
 Message = Dict[str, Any]
@@ -71,10 +77,27 @@ async def _reply(send: Send, status: int, message: str, extra_headers: Optional[
 class HttpGuard:
     """ASGI middleware: shared-secret check, then a buffered, capped request body."""
 
-    def __init__(self, app: ASGIApp, shared_secret: Optional[str], max_body_bytes: int = MAX_BODY_BYTES):
+    def __init__(
+        self,
+        app: ASGIApp,
+        shared_secret: Optional[str],
+        max_body_bytes: int = MAX_BODY_BYTES,
+        max_buffered_bytes: int = MAX_BUFFERED_BYTES,
+        body_deadline: float = BODY_DEADLINE_SECONDS,
+    ):
         self.app = app
         self._secret_digest = _digest(shared_secret.encode()) if shared_secret else None
         self.max_body_bytes = max_body_bytes
+        self.max_buffered_bytes = max_buffered_bytes
+        self.body_deadline = body_deadline
+        self._buffered = 0  # bytes held across all in-flight requests (one event loop, no lock needed)
+
+    @property
+    def has_secret(self) -> bool:
+        return self._secret_digest is not None
+
+    def holds_secret(self, secret: str) -> bool:
+        return self._secret_digest is not None and hmac.compare_digest(_digest(secret.encode()), self._secret_digest)
 
     def _authorized(self, scope: Scope) -> bool:
         if self._secret_digest is None:
@@ -108,29 +131,48 @@ class HttpGuard:
                     return
 
         # Read the body here, counting as it arrives, then hand it to the app in one piece.
+        # Every byte held counts against a cap shared by all requests, and the whole body has
+        # one deadline, so key holders can't pile up memory or hold connections open.
+        held = [0]  # bytes this request holds against the shared cap; always given back
+        try:
+            try:
+                body = await asyncio.wait_for(self._read_body(receive, send, held), timeout=self.body_deadline)
+            except asyncio.TimeoutError:
+                await _reply(send, 408, "Request body took too long.", [(b"connection", b"close")])
+                return
+            if body is None:
+                return  # already answered (413/503), or the client went away
+
+            replayed = False
+
+            async def replay() -> Message:
+                nonlocal replayed
+                if not replayed:
+                    replayed = True
+                    return {"type": "http.request", "body": body, "more_body": False}
+                return await receive()
+
+            await self.app(scope, replay, send)
+        finally:
+            self._buffered -= held[0]
+
+    async def _read_body(self, receive: Receive, send: Send, held: List[int]) -> Optional[bytes]:
         chunks: List[bytes] = []
         total = 0
         while True:
             message = await receive()
             if message["type"] == "http.disconnect":
-                return
+                return None
             chunk = message.get("body", b"")
             total += len(chunk)
             if total > self.max_body_bytes:
                 await _reply(send, 413, f"Request body over {self.max_body_bytes} bytes.", [(b"connection", b"close")])
-                return
+                return None
+            if self._buffered + len(chunk) > self.max_buffered_bytes:
+                await _reply(send, 503, "Server busy; try again shortly.", [(b"retry-after", b"5")])
+                return None
+            self._buffered += len(chunk)
+            held[0] += len(chunk)
             chunks.append(chunk)
             if not message.get("more_body", False):
-                break
-
-        body = b"".join(chunks)
-        replayed = False
-
-        async def replay() -> Message:
-            nonlocal replayed
-            if not replayed:
-                replayed = True
-                return {"type": "http.request", "body": body, "more_body": False}
-            return await receive()
-
-        await self.app(scope, replay, send)
+                return b"".join(chunks)
