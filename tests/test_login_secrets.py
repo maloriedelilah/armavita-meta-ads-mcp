@@ -217,3 +217,27 @@ def test_token_cache_folder_is_made_private_only_when_a_token_is_saved(tmp_path,
     manager._persist_token()
     assert stat.S_IMODE(os.stat(cache.parent).st_mode) == 0o700
     assert stat.S_IMODE(os.stat(cache).st_mode) == 0o600
+
+
+def test_token_save_never_writes_through_a_symlink(tmp_path, monkeypatch):
+    """A symlink at the cache path is replaced, not followed (Errata, #18 Low)."""
+    import os
+
+    from armavita_meta_ads_mcp.core import auth_state
+
+    if os.name != "posix":
+        pytest.skip("symlink semantics")
+    victim = tmp_path / "victim.txt"
+    victim.write_text("untouched")
+    folder = tmp_path / "cfg"
+    folder.mkdir()
+    cache = folder / "token_cache.json"
+    os.symlink(victim, cache)
+    manager = auth_state.auth_manager
+    monkeypatch.setattr(manager, "_cache_path", lambda: cache)
+    monkeypatch.setattr(manager, "token_info", auth_state.TokenInfo(meta_access_token="EAA" + "y" * 40))
+    manager._persist_token()
+
+    assert victim.read_text() == "untouched"
+    assert not cache.is_symlink() and "EAA" in cache.read_text()
+    assert not [p for p in folder.iterdir() if p.name.endswith(".tmp")]

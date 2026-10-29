@@ -116,7 +116,19 @@ def test_the_cap_fits_the_largest_image_upload():
 
 @pytest.mark.parametrize(
     "secret, ok",
-    [(None, False), ("short", False), ("a" * 31, False), ("a" * 32, True), ("a" * 30 + " b", False), ("a" * 40 + "\n", False)],
+    [
+        (None, False),
+        ("short", False),
+        ("a" * 31, False),
+        ("a" * 32, True),
+        ("Ab0-_" * 8, True),
+        ("a" * 30 + " b", False),
+        ("a" * 40 + "\n", False),
+        ("a" * 40 + "'", False),
+        ("a" * 40 + '"', False),
+        ("a" * 40 + "\\", False),
+        ("a" * 40 + "+/=", False),
+    ],
 )
 def test_secret_problem(secret, ok):
     assert (http_guard.secret_problem(secret) is None) is ok
@@ -231,6 +243,10 @@ def test_production_runs_the_guard_with_the_secret(monkeypatch):
     # _run_streamable_http rewires logging (stderr only, no RichHandler); put it back after.
     saved_handlers = {name: list(logging.getLogger(name).handlers) for name in ("", media_helpers.LOGGER_NAME)}
     mcp_server._session_manager = None
+    from rich.logging import RichHandler
+
+    # As in production: the MCP SDK puts a RichHandler(rich_tracebacks=True) on root.
+    logging.getLogger().addHandler(RichHandler(rich_tracebacks=True))
     try:
         with patch("uvicorn.run") as run:
             mcp_runtime._run_streamable_http("127.0.0.1", 8765, [], "/mcp", SECRET)
@@ -238,6 +254,10 @@ def test_production_runs_the_guard_with_the_secret(monkeypatch):
         assert isinstance(app, http_guard.HttpGuard)
         assert app.holds_secret(SECRET)
         assert not app.holds_secret(SECRET + "x")
+        # Errata round 2: the logging wiring must be part of the production path too.
+        root = logging.getLogger().handlers
+        assert root and not any(isinstance(h, RichHandler) for h in root)
+        assert all(any(isinstance(f, log_redaction.TokenRedactingFilter) for f in h.filters) for h in root)
     finally:
         http_mode.disable()
         mcp_server._session_manager = None
@@ -284,3 +304,20 @@ async def test_bodies_held_at_once_are_capped_and_released():
         release.set()
         assert (await first).status_code == 200
     assert guard._buffered == 0
+
+
+def test_main_registers_the_secret_for_redaction(monkeypatch):
+    """Errata round 2: main() must register the exact secret, so it's redacted however it appears."""
+    import sys as _sys
+    from unittest.mock import patch
+
+    secret = "MainRegisteredSecret_" + "z" * 24
+    monkeypatch.setenv("ARMAVITA_MCP_SHARED_SECRET", secret)
+    monkeypatch.setattr(log_redaction, "_LITERALS", [])
+    argv = ["armavita-meta-ads-mcp", "--transport", "streamable-http"]
+    with patch.object(_sys, "argv", argv), patch.object(mcp_runtime, "_run_streamable_http", return_value=0), patch.object(
+        log_redaction, "log_to_stderr_only"
+    ):
+        assert mcp_runtime.main() == 0
+    assert secret in log_redaction._LITERALS
+    assert secret not in log_redaction.redact(f"odd framing <{secret}>")

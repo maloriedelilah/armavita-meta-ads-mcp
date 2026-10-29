@@ -162,11 +162,23 @@ class AuthManager:
         except OSError:
             pass
         data = json.dumps(self.token_info.serialize())
-        # Write the access token with owner-only permissions (0600). Opening with
-        # O_CREAT|0o600 sets the mode on creation; chmod re-tightens a pre-existing file.
-        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(data)
+        # Write a new owner-only (0600) file beside the cache and rename it over the cache.
+        # O_EXCL|O_NOFOLLOW: never write through a symlink planted at the temp path, and
+        # os.replace swaps the directory entry itself, so a symlink at the cache path is
+        # replaced rather than followed (Errata, #18 Low).
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(str(tmp), flags, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(data)
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
         try:
             os.chmod(path, 0o600)
         except OSError:

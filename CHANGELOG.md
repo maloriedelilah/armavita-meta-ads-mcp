@@ -13,6 +13,7 @@
   - The server refuses to start in HTTP mode without a secret of at least 32 characters. `--no-shared-secret` is for local tests only: it's refused on a non-loopback host or with `--allowed-host`.
   - Request bodies are capped at 44 MiB (the largest image upload plus JSON). The cap is checked against Content-Length and while a chunked body streams in, and either way the reply is a 413.
   - The shared secret is redacted from logs, both by header name and as its exact value.
+  - The secret may contain only letters, digits, `-` and `_` (what `secrets.token_urlsafe` produces), so it can't appear escaped in a repr where literal redaction would miss it.
   - A body must arrive within 120 seconds (otherwise 408), and all requests together hold at most about 96 MiB of body (otherwise 503).
   - Logs: rich's `RichHandler`, which the MCP SDK installs on the root logger, is replaced with a plain stderr handler. The redacting filter also drops the live exception after rendering a redacted traceback. A rich traceback used to print secrets and tokens from the exception (and its locals) in the clear.
   - New guide, [docs/http-mode.md](docs/http-mode.md): the start command, Cloudflare Tunnel versus Claude MCP tunnels, connector headers and rotation.
@@ -23,6 +24,7 @@
 
 ### Fixed
 
+- **The `--login` token is written safely.** It goes to a new 0600 temp file (`O_EXCL|O_NOFOLLOW`), which is then renamed over the cache, so a symlink at the cache path is replaced rather than written through.
 - **Nothing is created on the host at import (Errata's nit on #16).** The `~/.config/armavita-meta-ads-mcp` folder is made only when server.log is first written (stdio), or when a `--login` token is saved, and then with 0700 permissions. HTTP mode creates no folder at all.
 - **Untrusted image bytes are handled with limits (ADS-62, security).**
   - Pillow opens only JPEG, PNG, WEBP and GIF. An EPS in a creative can no longer make Pillow launch Ghostscript, which would inherit the server's environment.
