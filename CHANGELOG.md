@@ -15,6 +15,7 @@
 
 ### Fixed
 
+- **Nothing is created on the host at import (Errata's nit on #16).** The `~/.config/armavita-meta-ads-mcp` folder is made only when server.log is first written (stdio), or when a `--login` token is saved, and then with 0700 permissions. HTTP mode creates no folder at all.
 - **Untrusted image bytes are handled with limits (ADS-62, security).**
   - Pillow opens only JPEG, PNG, WEBP and GIF. An EPS in a creative can no longer make Pillow launch Ghostscript, which would inherit the server's environment.
   - Images over 40 megapixels are refused before decoding. Pillow's default only warned up to twice its limit, and a 20 KB PNG could reach ~900 MB of memory.
