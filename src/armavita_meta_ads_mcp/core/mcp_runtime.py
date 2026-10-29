@@ -14,7 +14,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 
 from . import http_guard, http_mode, log_redaction
 from .auth_state import login as login_auth
-from .media_helpers import logger
+from .media_helpers import log_startup_config, logger
 
 
 class _ArmavitaFastMCP(FastMCP):
@@ -167,6 +167,7 @@ def _run_streamable_http(
     # (root, the MCP SDK, httpx, and uvicorn's own handlers via its log config).
     log_redaction.install_everywhere(_LIBRARY_LOGGERS)
     # In HTTP mode, no server.log: the package logs to stderr only (Errata, ADS-45).
+    # main() already did this before the first log line; repeating it is harmless.
     log_redaction.log_to_stderr_only(logger)
     uvicorn.run(
         app,
@@ -219,6 +220,12 @@ def main() -> int:
 
         print(f"Armavita Meta Ads MCP v{__version__}")
         return 0
+
+    if args.transport == "streamable-http" and not args.login:
+        # ADS-45: in HTTP mode the package logs to stderr only. Swap before the first log line,
+        # so server.log is never created.
+        log_redaction.log_to_stderr_only(logger)
+    log_startup_config()
 
     _configure_meta_app_id(args.app_id)
 

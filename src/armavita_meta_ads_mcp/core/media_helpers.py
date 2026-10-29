@@ -37,6 +37,18 @@ def _resolve_log_file() -> pathlib.Path:
     return log_dir / "server.log"
 
 
+class _PrivateFileHandler(logging.FileHandler):
+    """A FileHandler whose file is owner-only (0600) from the moment it exists (ADS-45)."""
+
+    def _open(self):
+        fd = os.open(self.baseFilename, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        try:
+            os.chmod(self.baseFilename, 0o600)  # an older server.log may still be 0644
+        except OSError:
+            pass
+        return os.fdopen(fd, self.mode, encoding=self.encoding, errors=self.errors)
+
+
 def _create_logger() -> logging.Logger:
     from .log_redaction import install_on_handlers
 
@@ -46,25 +58,27 @@ def _create_logger() -> logging.Logger:
         return logger
 
     logger.setLevel(logging.INFO)
-    log_file = _resolve_log_file()
-    handler = logging.FileHandler(log_file, encoding="utf-8")
-    try:
-        # Only the user may read the log (ADS-45); a no-op where chmod isn't supported.
-        os.chmod(log_file, 0o600)
-    except OSError:
-        pass
+    # delay=True: the file isn't created until something is logged to it. In HTTP mode the
+    # handler is swapped for stderr before anything is, so no server.log appears at all.
+    handler = _PrivateFileHandler(_resolve_log_file(), encoding="utf-8", delay=True)
     formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
     handler.setFormatter(formatter)
     install_on_handlers([handler])  # ADS-45: no token reaches server.log
     logger.addHandler(handler)
     logger.propagate = False
+    return logger
+
+
+def log_startup_config() -> None:
+    """Startup lines, logged once the transport (and so the log destination) is known."""
+    from .graph_client import META_GRAPH_API_VERSION
 
     logger.info("logger_initialized")
+    logger.info("Core API initialized using Graph version %s", META_GRAPH_API_VERSION)
     if not META_APP_ID:
         logger.warning("META_APP_ID is not configured")
     if not META_APP_SECRET:
         logger.warning("META_APP_SECRET is not configured")
-    return logger
 
 
 logger = _create_logger()
