@@ -241,3 +241,32 @@ def test_token_save_never_writes_through_a_symlink(tmp_path, monkeypatch):
     assert victim.read_text() == "untouched"
     assert not cache.is_symlink() and "EAA" in cache.read_text()
     assert not [p for p in folder.iterdir() if p.name.endswith(".tmp")]
+
+
+def test_token_save_refuses_a_symlink_planted_at_the_temp_path(tmp_path, monkeypatch):
+    """O_EXCL|O_NOFOLLOW on the temp file: a symlink already at that name is never written through,
+    and the save fails rather than leaking the token (Errata, ADS-75 Low)."""
+    import os
+
+    from armavita_meta_ads_mcp.core import auth_state
+
+    if os.name != "posix":
+        pytest.skip("symlink semantics")
+    victim = tmp_path / "victim.txt"
+    victim.write_text("untouched")
+    folder = tmp_path / "cfg"
+    folder.mkdir()
+    cache = folder / "token_cache.json"
+    monkeypatch.setattr(auth_state.secrets, "token_hex", lambda n=None: "fixedname")
+    planted = folder / f".{cache.name}.{os.getpid()}.fixedname.tmp"
+    os.symlink(victim, planted)
+
+    manager = auth_state.auth_manager
+    monkeypatch.setattr(manager, "_cache_path", lambda: cache)
+    monkeypatch.setattr(manager, "token_info", auth_state.TokenInfo(meta_access_token="EAA" + "z" * 40))
+    with pytest.raises(FileExistsError):
+        manager._persist_token()
+
+    assert victim.read_text() == "untouched"
+    assert not cache.exists()
+    assert planted.is_symlink()  # left alone, not followed or replaced
