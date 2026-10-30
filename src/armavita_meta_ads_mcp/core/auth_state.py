@@ -381,7 +381,25 @@ async def get_current_access_token() -> Optional[str]:
 
 
 
+LOGIN_NEEDS_APP = (
+    "--login signs you in through a Meta app of your own, and none is configured.\n"
+    "Set META_APP_ID and META_APP_SECRET (from developers.facebook.com > your app > App settings > Basic),\n"
+    "and add http://localhost:8080/callback (8081-8089 if 8080 is busy) to that app's Facebook Login redirect URIs.\n"
+    "If you already put a token in META_ACCESS_TOKEN, you don't need --login at all."
+)
+
+
+def _login_app_configured() -> bool:
+    # The value that actually goes into the login URL as client_id.
+    app_id = str(auth_manager.app_id or "").strip()
+    return bool(app_id) and app_id != "MISSING_META_APP_ID" and app_id.isdigit()
+
+
 def login() -> None:
+    if not _login_app_configured():
+        # Without an app, Facebook only shows "Invalid App ID" (Malorie, Oct 30).
+        print(LOGIN_NEEDS_APP)
+        return
     print("Launching the Meta OAuth login flow...")
     try:
         port = start_callback_server()
