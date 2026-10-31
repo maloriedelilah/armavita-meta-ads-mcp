@@ -27,10 +27,13 @@ from .graph_constants import META_OAUTH_DIALOG_BASE, META_OAUTH_TOKEN_BASE
 from .media_helpers import logger
 
 
+# Facebook refuses the whole login when any scope is invalid: instagram_basic and
+# threads_business_basic were ("Invalid Scopes", Malorie, Oct 31). Override with
+# META_AUTH_SCOPE if an app needs more.
 AUTH_SCOPE = os.environ.get(
     "META_AUTH_SCOPE",
     "ads_management,ads_read,business_management,public_profile,"
-    "pages_show_list,pages_read_engagement,instagram_basic,threads_business_basic",
+    "pages_show_list,pages_read_engagement",
 )
 AUTH_CONFIG_ID = os.environ.get("META_LOGIN_CONFIG_ID", "").strip()
 AUTH_REDIRECT_URI = "http://localhost:8888/callback"
@@ -381,7 +384,36 @@ async def get_current_access_token() -> Optional[str]:
 
 
 
+LOGIN_NEEDS_APP = (
+    "--login signs you in through a Meta app of your own, and none is configured.\n"
+    "Set META_APP_ID and META_APP_SECRET (from developers.facebook.com > your app > App settings > Basic),\n"
+    "and add http://localhost:8080/callback (8081-8089 if 8080 is busy) to that app's Facebook Login redirect URIs.\n"
+    "If you already put a token in META_ACCESS_TOKEN, you don't need --login at all."
+)
+
+
+def _login_app_configured() -> bool:
+    # The value that actually goes into the login URL as client_id.
+    app_id = str(auth_manager.app_id or "").strip()
+    return bool(app_id) and app_id != "MISSING_META_APP_ID" and app_id.isdigit()
+
+
+LOGIN_NEEDS_SECRET = (
+    "META_APP_SECRET isn't set in this shell, so the login code can't be exchanged for a token.\n"
+    "Enter it without echoing it:  read -rs META_APP_SECRET; export META_APP_SECRET\n"
+    "(the prompt is silent: paste the secret and press Enter), then run --login again."
+)
+
+
 def login() -> None:
+    if not _login_app_configured():
+        # Without an app, Facebook only shows "Invalid App ID" (Malorie, Oct 30).
+        print(LOGIN_NEEDS_APP)
+        return
+    if not os.environ.get("META_APP_SECRET", "").strip():
+        # Otherwise Facebook's side succeeds and the exchange fails silently (Malorie, Oct 31).
+        print(LOGIN_NEEDS_SECRET)
+        return
     print("Launching the Meta OAuth login flow...")
     try:
         port = start_callback_server()
