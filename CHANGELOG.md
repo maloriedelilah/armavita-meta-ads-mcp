@@ -24,6 +24,8 @@
 
 ### Fixed
 
+- **`--login` no longer asks for `instagram_basic` or `threads_business_basic`.** Facebook rejected them as invalid scopes and stopped the login. `META_AUTH_SCOPE` still overrides the list.
+- **`--login` without a Meta app now says what it needs** instead of opening Facebook with `client_id=MISSING_META_APP_ID`, which only shows "Invalid App ID". It names `META_APP_ID` and `META_APP_SECRET` and the redirect URI to register, and points out that a token in `META_ACCESS_TOKEN` doesn't need `--login` at all. With an app ID but no `META_APP_SECRET`, it now says so before opening Facebook, instead of failing silently at the code exchange.
 - **The `--login` token is written safely.** It goes to a new 0600 temp file (`O_EXCL|O_NOFOLLOW`), which is then renamed over the cache, so a symlink at the cache path is replaced rather than written through.
 - **Nothing is created on the host at import (Errata's nit on #16).** The `~/.config/armavita-meta-ads-mcp` folder is made only when server.log is first written (stdio), or when a `--login` token is saved, and then with 0700 permissions. HTTP mode creates no folder at all.
 - **Untrusted image bytes are handled with limits (ADS-62, security).**

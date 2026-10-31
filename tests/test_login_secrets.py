@@ -270,3 +270,57 @@ def test_token_save_refuses_a_symlink_planted_at_the_temp_path(tmp_path, monkeyp
     assert victim.read_text() == "untouched"
     assert not cache.exists()
     assert planted.is_symlink()  # left alone, not followed or replaced
+
+
+@pytest.mark.parametrize("app_id", ["", "MISSING_META_APP_ID", "not-a-number"])
+def test_login_without_an_app_explains_instead_of_opening_facebook(monkeypatch, capsys, app_id):
+    """Without a Meta app, Facebook only says "Invalid App ID" (Malorie, Oct 30). Say what's needed instead."""
+    from unittest.mock import patch
+
+    from armavita_meta_ads_mcp.core import auth_state
+
+    monkeypatch.setattr(auth_state.auth_manager, "app_id", app_id)
+    with patch.object(auth_state.webbrowser, "open") as browser, patch.object(auth_state, "start_callback_server") as server:
+        auth_state.login()
+    browser.assert_not_called()
+    server.assert_not_called()
+    out = capsys.readouterr().out
+    assert "META_APP_ID" in out and "localhost:8080/callback" in out
+
+
+def test_login_with_an_app_still_opens_the_browser(monkeypatch):
+    from unittest.mock import patch
+
+    from armavita_meta_ads_mcp.core import auth_state
+
+    monkeypatch.setattr(auth_state.auth_manager, "app_id", "1234567890")
+    monkeypatch.setenv("META_APP_SECRET", "test-secret")
+    with patch.object(auth_state.webbrowser, "open") as browser, patch.object(
+        auth_state, "start_callback_server", return_value=8080
+    ), patch.object(auth_state, "shutdown_callback_server"), patch.object(auth_state.time, "time", side_effect=[0, 10_000]):
+        auth_state.login()
+    browser.assert_called_once()
+    assert "client_id=1234567890" in browser.call_args.args[0]
+
+
+def test_login_does_not_ask_for_scopes_facebook_rejects():
+    """Facebook answers "Invalid Scopes" for these and the login stops (Malorie, Oct 31)."""
+    from armavita_meta_ads_mcp.core import auth_state
+
+    scopes = auth_state.AUTH_SCOPE.split(",")
+    assert "instagram_basic" not in scopes and "threads_business_basic" not in scopes
+    assert {"ads_management", "ads_read"} <= set(scopes)
+
+
+def test_login_without_the_app_secret_says_so_before_opening_facebook(monkeypatch, capsys):
+    from unittest.mock import patch
+
+    from armavita_meta_ads_mcp.core import auth_state
+
+    monkeypatch.setattr(auth_state.auth_manager, "app_id", "1234567890")
+    monkeypatch.delenv("META_APP_SECRET", raising=False)
+    with patch.object(auth_state.webbrowser, "open") as browser, patch.object(auth_state, "start_callback_server") as server:
+        auth_state.login()
+    browser.assert_not_called()
+    server.assert_not_called()
+    assert "META_APP_SECRET" in capsys.readouterr().out
