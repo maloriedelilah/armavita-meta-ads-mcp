@@ -27,10 +27,13 @@ from .graph_constants import META_OAUTH_DIALOG_BASE, META_OAUTH_TOKEN_BASE
 from .media_helpers import logger
 
 
+# Facebook refuses the whole login when any scope is invalid: instagram_basic and
+# threads_business_basic were ("Invalid Scopes", Malorie, Oct 31). Override with
+# META_AUTH_SCOPE if an app needs more.
 AUTH_SCOPE = os.environ.get(
     "META_AUTH_SCOPE",
     "ads_management,ads_read,business_management,public_profile,"
-    "pages_show_list,pages_read_engagement,instagram_basic,threads_business_basic",
+    "pages_show_list,pages_read_engagement",
 )
 AUTH_CONFIG_ID = os.environ.get("META_LOGIN_CONFIG_ID", "").strip()
 AUTH_REDIRECT_URI = "http://localhost:8888/callback"

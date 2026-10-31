@@ -300,3 +300,12 @@ def test_login_with_an_app_still_opens_the_browser(monkeypatch):
         auth_state.login()
     browser.assert_called_once()
     assert "client_id=1234567890" in browser.call_args.args[0]
+
+
+def test_login_does_not_ask_for_scopes_facebook_rejects():
+    """Facebook answers "Invalid Scopes" for these and the login stops (Malorie, Oct 31)."""
+    from armavita_meta_ads_mcp.core import auth_state
+
+    scopes = auth_state.AUTH_SCOPE.split(",")
+    assert "instagram_basic" not in scopes and "threads_business_basic" not in scopes
+    assert {"ads_management", "ads_read"} <= set(scopes)
