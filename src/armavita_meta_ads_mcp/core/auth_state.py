@@ -398,10 +398,21 @@ def _login_app_configured() -> bool:
     return bool(app_id) and app_id != "MISSING_META_APP_ID" and app_id.isdigit()
 
 
+LOGIN_NEEDS_SECRET = (
+    "META_APP_SECRET isn't set in this shell, so the login code can't be exchanged for a token.\n"
+    "Enter it without echoing it:  read -rs META_APP_SECRET; export META_APP_SECRET\n"
+    "(the prompt is silent: paste the secret and press Enter), then run --login again."
+)
+
+
 def login() -> None:
     if not _login_app_configured():
         # Without an app, Facebook only shows "Invalid App ID" (Malorie, Oct 30).
         print(LOGIN_NEEDS_APP)
+        return
+    if not os.environ.get("META_APP_SECRET", "").strip():
+        # Otherwise Facebook's side succeeds and the exchange fails silently (Malorie, Oct 31).
+        print(LOGIN_NEEDS_SECRET)
         return
     print("Launching the Meta OAuth login flow...")
     try:
