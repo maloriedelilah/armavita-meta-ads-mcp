@@ -59,6 +59,58 @@ _callback_port: Optional[int] = None
 _shutdown_timer: Optional[threading.Timer] = None
 
 
+PAGE_TITLE = "Facebook API Ads MCP Connector"
+
+_PAGE_STYLE = (
+    ":root{color-scheme:light dark;--bg:#f7f7f8;--card:#fff;--ink:#1d1d1f;--muted:#5f6368;--line:#dadce0;"
+    "--ok:#188038;--bad:#c5221f}"
+    "@media (prefers-color-scheme:dark){:root{--bg:#141416;--card:#1e1f22;--ink:#ececee;--muted:#a1a4a9;"
+    "--line:#34363a;--ok:#81c995;--bad:#f28b82}}"
+    "*{box-sizing:border-box}"
+    "body{margin:0;background:var(--bg);color:var(--ink);"
+    "font:16px/1.55 system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif}"
+    "main{max-width:34rem;margin:12vh auto;padding:0 16px}"
+    ".card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:32px 28px;text-align:center}"
+    ".brand{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 20px}"
+    ".mark{font-size:34px;line-height:1;margin:0 0 12px}"
+    ".ok .mark{color:var(--ok)}.bad .mark{color:var(--bad)}"
+    "h1{font-size:24px;line-height:1.25;margin:0 0 14px}"
+    "p{margin:0 0 12px;color:var(--muted)}"
+    ".close{margin-top:22px;color:var(--ink);font-weight:600}"
+)
+
+
+def render_page(heading: str, paragraphs: list, tone: str = "ok", show_close: bool = True) -> str:
+    """A centered, sans-serif page for the browser at the end of --login (ADS-84).
+
+    Every piece of text is escaped here, so callers pass plain strings. No scripts.
+    """
+    mark = {"ok": "\u2713", "bad": "\u2715"}.get(tone, "")
+    parts = [
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">",
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">",
+        f"<title>{html.escape(heading)} \u00b7 {html.escape(PAGE_TITLE)}</title>",
+        f"<style>{_PAGE_STYLE}</style></head><body><main>",
+        f"<div class=\"card {html.escape(tone)}\"><p class=\"brand\">{html.escape(PAGE_TITLE)}</p>",
+    ]
+    if mark:
+        parts.append(f"<p class=\"mark\" aria-hidden=\"true\">{mark}</p>")
+    parts.append(f"<h1>{html.escape(heading)}</h1>")
+    parts.extend(f"<p>{html.escape(str(text))}</p>" for text in paragraphs)
+    if show_close:
+        parts.append("<p class=\"close\">You can close this window.</p>")
+    parts.append("</div></main></body></html>")
+    return "".join(parts)
+
+
+def _failed_page(reason: str) -> str:
+    return render_page(
+        "Authorization failed",
+        [reason, "Nothing was saved. Go back to your terminal and run --login again."],
+        tone="bad",
+    )
+
+
 class CallbackHandler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
         parsed = urlparse(self.path)
@@ -80,6 +132,14 @@ class CallbackHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+        )
         self.end_headers()
         self.wfile.write(body)
 
@@ -96,7 +156,11 @@ class CallbackHandler(BaseHTTPRequestHandler):
             # and abort a login in progress. Ignore it and keep waiting.
             if not _state_is_valid(state, token_container.get("expected_state")):
                 self._html_response(
-                    "<html><body><h1>Ignored</h1><p>This callback does not belong to the login in progress.</p></body></html>"
+                    render_page(
+                        "Ignored",
+                        ["This page doesn't belong to the login in progress, so nothing changed."],
+                        tone="neutral",
+                    )
                 )
                 return
             primary_text = auth_error_description or auth_error
@@ -108,11 +172,7 @@ class CallbackHandler(BaseHTTPRequestHandler):
                     "timestamp": time.time(),
                 }
             )
-            self._html_response(
-                "<html><body><h1>Authorization failed</h1><p>"
-                + html.escape(str(primary_text))
-                + "</p></body></html>"
-            )
+            self._html_response(_failed_page(f"Facebook said: {primary_text}"))
             _shutdown_async()
             return
 
@@ -124,9 +184,7 @@ class CallbackHandler(BaseHTTPRequestHandler):
                     "timestamp": time.time(),
                 }
             )
-            self._html_response(
-                "<html><body><h1>Authorization failed</h1><p>No auth code provided.</p></body></html>"
-            )
+            self._html_response(_failed_page("Facebook didn't send back an authorization code."))
             _shutdown_async()
             return
 
@@ -144,8 +202,7 @@ class CallbackHandler(BaseHTTPRequestHandler):
                 }
             )
             self._html_response(
-                "<html><body><h1>Authorization failed</h1>"
-                "<p>State verification failed (possible CSRF). Please retry login.</p></body></html>"
+                _failed_page("This reply didn't match the login that was started, so it was refused (a CSRF check).")
             )
             _shutdown_async()
             return
@@ -181,8 +238,15 @@ class CallbackHandler(BaseHTTPRequestHandler):
                     }
                 )
                 self._html_response(
-                    "<html><body><h1>Authorization complete</h1><p>You can close this window.</p>"
-                    "<script>setTimeout(()=>window.close(),1200);</script></body></html>"
+                    render_page(
+                        "Authorization complete",
+                        [
+                            "Facebook signed you in, and the connector saved your Meta access token on this "
+                            "computer, in a file only your user account can read.",
+                            "Your AI app can now use the Meta Ads tools with your ad accounts. When the token "
+                            "expires, run --login again to get a new one.",
+                        ],
+                    )
                 )
             else:
                 error_code = result.get("error", "oauth_completion_failed")
@@ -194,9 +258,7 @@ class CallbackHandler(BaseHTTPRequestHandler):
                     }
                 )
                 self._html_response(
-                    "<html><body><h1>Authorization failed</h1><p>"
-                    + html.escape(str(error_code))
-                    + "</p></body></html>"
+                    _failed_page(f"Facebook's sign-in finished, but getting the token failed ({error_code}).")
                 )
         except Exception as exc:  # noqa: BLE001
             logger.error("OAuth completion callback failed: %s", type(exc).__name__)
@@ -207,9 +269,7 @@ class CallbackHandler(BaseHTTPRequestHandler):
                     "timestamp": time.time(),
                 }
             )
-            self._html_response(
-                "<html><body><h1>Authorization failed</h1><p>Internal error while completing login.</p></body></html>"
-            )
+            self._html_response(_failed_page("Something went wrong while finishing the login."))
 
         _shutdown_async()
 
