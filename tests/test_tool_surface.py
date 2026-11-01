@@ -424,6 +424,7 @@ def test_v1_signature_snapshot():
                    'bid_constraints',
                    'status',
                    'targeting',
+                   'targeting_patch',
                    'optimization_goal',
                    'daily_budget',
                    'lifetime_budget',
