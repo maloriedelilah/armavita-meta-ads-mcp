@@ -572,13 +572,6 @@ async def update_ad_set(
 ) -> str:
     """Update an ad set's delivery, budgeting, and targeting configuration.
 
-    Money: `daily_budget`, `lifetime_budget` and `bid_amount` are whole numbers in the ad
-    account's minor currency units (cents for USD, EUR, GBP, CAD, AUD, so 1000 = 10.00; whole
-    units for JPY, KRW and other currencies without cents). read_ad_account shows the
-    currency. Each must be more than 0. A budget change takes effect at once on a running ad
-    set. Raising a budget to more than 3x its current value is refused unless
-    `confirm_budget_increase=true`.
-
     `value_rule_set_id`:
     - a value rule set ID (from `list_value_rule_sets`) attaches that set;
     - an empty string "" detaches the ad set's current value rule set;
@@ -588,6 +581,13 @@ async def update_ad_set(
       never silently strip a value rule. Pass "" to detach.
     The result says what happened to the value rule set. Read the ad set back
     afterwards: `read_ad_set` returns `value_rule_set_id`.
+
+    Money: `daily_budget`, `lifetime_budget` and `bid_amount` are whole numbers in the ad
+    account's minor currency units (cents for USD, EUR, GBP, CAD, AUD, so 1000 = 10.00; whole
+    units for JPY, KRW and other currencies without cents). read_ad_account shows the
+    currency. Each must be more than 0. A budget change takes effect at once on a running ad
+    set. Raising a budget to more than 3x its current value is refused unless
+    `confirm_budget_increase=true`.
     """
     status, status_error = status_policy.update_status(status)
     if status_error:
@@ -704,12 +704,12 @@ async def update_ad_set(
         if isinstance(result, dict):
             if update_targeting_warning:
                 result["_warning"] = update_targeting_warning
-            if increase_check:
-                result["budget_increase_check"] = increase_check
             if "value_rule_set_id" in payload and not result.get("error"):
                 # Say what happened, so a detach is never silent in the reply.
                 sent = payload["value_rule_set_id"]
                 result["value_rule_set"] = {"detached": True} if sent == "" else {"attached": sent}
+            if increase_check:
+                result["budget_increase_check"] = increase_check
             if dropped_fields_warning:
                 existing = result.get("warnings")
                 result["warnings"] = (
