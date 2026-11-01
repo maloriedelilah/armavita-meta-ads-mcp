@@ -104,8 +104,17 @@ def _append_warning(warnings: List[Dict[str, Any]], option: str, reason: str) ->
     warnings.append({"option": option, "reason": reason})
 
 
+class _Unsupported(ValueError):
+    """An option this copy can't honour. Refused before anything is copied (ADS-57)."""
+
+
 def _build_copy_params(resource_type: str, options: Dict[str, Any]) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
-    """Map tool options to Meta copy edge params and warnings for unsupported overrides."""
+    """Map tool options to Meta copy edge params.
+
+    Every option either goes to Graph or is refused (_Unsupported) before the copy: a copy that
+    quietly ignores an option and reports success is what ADS-57 removed. Budget, targeting and
+    content can't be changed by the copy edges; copy first, then use the update_* tools.
+    """
     params: Dict[str, Any] = {}
     warnings: List[Dict[str, Any]] = []
 
@@ -121,74 +130,28 @@ def _build_copy_params(resource_type: str, options: Dict[str, Any]) -> Tuple[Dic
         params["status_option"] = str(new_status).upper()
 
     if resource_type == "campaign":
-        params["deep_copy"] = True
+        include_ad_sets = options.get("include_ad_sets", True) is not False
+        include_ads = options.get("include_ads", True) is not False
+        if include_ad_sets and not include_ads:
+            raise _Unsupported(
+                "Meta's campaign copy either copies the whole campaign (its ad sets with their ads) or the campaign "
+                "alone. It can't copy ad sets without their ads. Use include_ad_sets=false for the campaign alone, "
+                "or copy everything and pause or delete the ads you don't want."
+            )
+        # deep_copy (Graph default false) copies the ad sets and their ads; without it, the campaign alone.
+        params["deep_copy"] = include_ad_sets
         if options.get("migrate_to_advantage_plus") is not None:
             params["migrate_to_advantage_plus"] = (
                 "true" if bool(options.get("migrate_to_advantage_plus")) else "false"
             )
 
-        if options.get("include_ad_sets") is False:
-            _append_warning(
-                warnings,
-                "include_ad_sets",
-                "Meta's campaign copy edge deep-copies hierarchy; selective exclusion is not supported.",
-            )
-        if options.get("include_ads") is False:
-            _append_warning(
-                warnings,
-                "include_ads",
-                "Meta's campaign copy edge deep-copies hierarchy; selective exclusion is not supported.",
-            )
-        if options.get("include_creatives") is False:
-            _append_warning(
-                warnings,
-                "include_creatives",
-                "Meta's campaign copy edge deep-copies hierarchy; selective exclusion is not supported.",
-            )
-        if options.get("copy_schedule") is not None:
-            _append_warning(
-                warnings,
-                "copy_schedule",
-                "Schedule-copy override is not exposed by local copy edge; source behavior is used.",
-            )
-        if options.get("new_daily_budget") is not None:
-            _append_warning(
-                warnings,
-                "new_daily_budget",
-                "Budget override is not applied during copy; update the duplicated object after creation.",
-            )
-
     elif resource_type == "adset":
-        params["deep_copy"] = bool(options.get("include_ads", True) or options.get("include_creatives", True))
+        # deep_copy (Graph default false) also copies the ad set's ads.
+        params["deep_copy"] = options.get("include_ads", True) is not False
 
         target_campaign_id = options.get("target_campaign_id")
         if target_campaign_id:
             params["campaign_id"] = target_campaign_id
-
-        if options.get("include_ads") is False:
-            _append_warning(
-                warnings,
-                "include_ads",
-                "Ad-set copy edge does not support omitting child ads during copy.",
-            )
-        if options.get("include_creatives") is False:
-            _append_warning(
-                warnings,
-                "include_creatives",
-                "Ad-set copy edge does not support selective creative exclusion.",
-            )
-        if options.get("new_daily_budget") is not None:
-            _append_warning(
-                warnings,
-                "new_daily_budget",
-                "Budget override is not applied during copy; update the duplicated object after creation.",
-            )
-        if options.get("new_targeting") is not None:
-            _append_warning(
-                warnings,
-                "new_targeting",
-                "Targeting override is not applied during copy; update the duplicated object after creation.",
-            )
 
     elif resource_type == "ad":
         params["deep_copy"] = bool(options.get("clone_ad_creative", True))
@@ -197,31 +160,26 @@ def _build_copy_params(resource_type: str, options: Dict[str, Any]) -> Tuple[Dic
         if target_ad_set_id:
             params["adset_id"] = target_ad_set_id
 
-        if options.get("new_creative_name") is not None:
-            _append_warning(
-                warnings,
-                "new_creative_name",
-                "Creative rename override is not applied during copy; update duplicated creative after creation.",
-            )
-
     elif resource_type == "creative":
         params["deep_copy"] = True
 
-        for option_name in (
-            "new_primary_text",
-            "new_headline",
-            "new_description",
-            "new_cta_type",
-            "new_destination_url",
-        ):
-            if options.get(option_name) is not None:
-                _append_warning(
-                    warnings,
-                    option_name,
-                    "Content overrides are not applied during creative copy; update duplicated creative after creation.",
-                )
-
     return params, warnings
+
+
+def _copied_objects(response: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Every object a (deep) copy made, from Graph's ad_object_ids: type, source and new ID."""
+    found = response.get("ad_object_ids")
+    if not isinstance(found, list) and isinstance(response.get("data"), dict):
+        found = response["data"].get("ad_object_ids")
+    objects = []
+    for item in found if isinstance(found, list) else []:
+        if isinstance(item, dict) and item.get("copied_id"):
+            objects.append({
+                "type": item.get("ad_object_type"),
+                "source_id": str(item.get("source_id") or ""),
+                "new_id": str(item.get("copied_id")),
+            })
+    return objects
 
 
 def _extract_new_id(resource_type: str, response: Dict[str, Any]) -> Optional[str]:
@@ -307,13 +265,18 @@ async def clone_campaign(
     name_suffix: Optional[str] = " - Copy",
     include_ad_sets: bool = True,
     include_ads: bool = True,
-    include_creatives: bool = True,
-    copy_schedule: bool = False,
-    new_daily_budget: Optional[float] = None,
     new_status: Optional[str] = "PAUSED",
     migrate_to_advantage_plus: Optional[bool] = None,
 ) -> str:
-    """Duplicate a campaign using Meta's local Graph copy edge."""
+    """Duplicate a campaign with Meta's copy edge. The copy is PAUSED.
+
+    - include_ad_sets=true (default) copies its ad sets and their ads too; false copies the
+      campaign alone. Copying ad sets without their ads isn't possible (refused).
+    - The copy keeps the source's budget, targeting and content. To change them, copy first,
+      then use update_campaign / update_ad_set / update_ad on the new IDs.
+    - The reply lists every object made (`copied_objects`: type, source ID, new ID).
+    - Meta copies at most 3 ads in one go; a bigger deep copy is refused by Meta.
+    """
     new_status, status_error = status_policy.create_status(new_status)
     if status_error:
         return json.dumps({"error": status_error}, indent=2)
@@ -325,9 +288,6 @@ async def clone_campaign(
             "name_suffix": name_suffix,
             "include_ad_sets": include_ad_sets,
             "include_ads": include_ads,
-            "include_creatives": include_creatives,
-            "copy_schedule": copy_schedule,
-            "new_daily_budget": new_daily_budget,
             "new_status": new_status,
             "migrate_to_advantage_plus": migrate_to_advantage_plus,
         },
@@ -342,12 +302,17 @@ async def clone_ad_set(
     target_campaign_id: Optional[str] = None,
     name_suffix: Optional[str] = " - Copy",
     include_ads: bool = True,
-    include_creatives: bool = True,
-    new_daily_budget: Optional[float] = None,
-    new_targeting: Optional[Dict[str, Any]] = None,
     new_status: Optional[str] = "PAUSED",
 ) -> str:
-    """Duplicate an ad set using Meta's local Graph copy edge."""
+    """Duplicate an ad set with Meta's copy edge. The copy is PAUSED.
+
+    - include_ads=true (default) copies its ads too; false copies the ad set alone.
+    - target_campaign_id puts the copy under another campaign (it then follows that
+      campaign's settings, such as a campaign budget).
+    - The copy keeps the source's budget and targeting. To change them, copy first, then
+      use update_ad_set on the new ID (targeting_patch changes only the keys you give).
+    - The reply lists every object made (`copied_objects`).
+    """
     new_status, status_error = status_policy.create_status(new_status)
     if status_error:
         return json.dumps({"error": status_error}, indent=2)
@@ -359,9 +324,6 @@ async def clone_ad_set(
             "target_campaign_id": target_campaign_id,
             "name_suffix": name_suffix,
             "include_ads": include_ads,
-            "include_creatives": include_creatives,
-            "new_daily_budget": new_daily_budget,
-            "new_targeting": new_targeting,
             "new_status": new_status,
         },
     )
@@ -375,10 +337,13 @@ async def clone_ad(
     target_ad_set_id: Optional[str] = None,
     name_suffix: Optional[str] = " - Copy",
     clone_ad_creative: bool = True,
-    new_creative_name: Optional[str] = None,
     new_status: Optional[str] = "PAUSED",
 ) -> str:
-    """Duplicate an ad using Meta's local Graph copy edge."""
+    """Duplicate an ad with Meta's copy edge. The copy is PAUSED.
+
+    The copy keeps the source's creative. To change it, copy first, then use update_ad.
+    The reply lists every object made (`copied_objects`).
+    """
     new_status, status_error = status_policy.create_status(new_status)
     if status_error:
         return json.dumps({"error": status_error}, indent=2)
@@ -390,7 +355,6 @@ async def clone_ad(
             "target_ad_set_id": target_ad_set_id,
             "name_suffix": name_suffix,
             "clone_ad_creative": clone_ad_creative,
-            "new_creative_name": new_creative_name,
             "new_status": new_status,
         },
     )
@@ -402,24 +366,19 @@ async def clone_ad_creative(
     ad_creative_id: str,
     meta_access_token: Optional[str] = None,
     name_suffix: Optional[str] = " - Copy",
-    new_primary_text: Optional[str] = None,
-    new_headline: Optional[str] = None,
-    new_description: Optional[str] = None,
-    new_cta_type: Optional[str] = None,
-    new_destination_url: Optional[str] = None,
 ) -> str:
-    """Duplicate a creative using Meta's local Graph copy edge."""
+    """Duplicate a creative with Meta's copy edge.
+
+    The copy has the same text, headline, call to action and link. Creatives can't be edited
+    in place on Meta for most fields: to change content, make a new creative with
+    create_ad_creative instead.
+    """
     return await _forward_duplication_request(
         "creative",
         ad_creative_id,
         meta_access_token,
         {
             "name_suffix": name_suffix,
-            "new_primary_text": new_primary_text,
-            "new_headline": new_headline,
-            "new_description": new_description,
-            "new_cta_type": new_cta_type,
-            "new_destination_url": new_destination_url,
         },
     )
 
@@ -488,7 +447,20 @@ async def _forward_duplication_request(
                 )
             )
 
-        copy_params, warnings = _build_copy_params(resource_type, options)
+        try:
+            copy_params, warnings = _build_copy_params(resource_type, options)
+        except _Unsupported as refused:
+            raise DuplicationError(
+                json.dumps(
+                    {
+                        "success": False,
+                        "error": "unsupported_option",
+                        "message": f"{refused} Nothing was copied.",
+                        "details": {"resource_type": resource_type, "resource_id": resource_id},
+                    },
+                    indent=2,
+                )
+            )
         endpoint = f"{resource_id}/copies"
 
         data = await make_api_request(endpoint, facebook_token, copy_params, method="POST")
@@ -544,6 +516,7 @@ async def _forward_duplication_request(
                 "source_id": resource_id,
                 "resource_type": resource_type,
                 "new_id": new_id,
+                "copied_objects": _copied_objects(data),
                 "warnings": warnings,
                 "meta_response": data,
             },
