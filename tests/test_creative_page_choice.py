@@ -89,3 +89,32 @@ async def test_no_page_at_all_is_refused():
     api, calls = _graph([])
     out = await _create(api)
     assert "no Facebook Page could be found" in out["error"] and _posted_page(calls) is None
+
+
+@pytest.mark.asyncio
+async def test_a_source_that_failed_means_no_automatic_pick():
+    """Errata's repro (ADS-58 r2): me/accounts is rate-limited (an error dict, not an exception)
+    and the business's owned_pages shows one Page. That's one Page we could see, not the only one."""
+    calls = []
+
+    async def api(endpoint, token, params=None, method="GET"):
+        calls.append((endpoint, method, dict(params or {})))
+        if endpoint == "me/accounts":
+            return {"error": {"message": "HTTP Error: 400", "details": {"error": {"code": 4, "message": "rate limit"}}}}
+        if endpoint == "act_555":
+            return {"business": {"id": "b1"}}
+        if endpoint == "b1/owned_pages":
+            return {"data": [{"id": "2002", "name": "Client A page"}]}
+        return {"data": []}
+
+    out = await _create(api)
+    assert "won't pick one" in out["error"] and "me/accounts" in out["unreadable_sources"]
+    assert [p["facebook_page_id"] for p in out["pages"]] == ["2002"]
+    assert _posted_page(calls) is None
+
+
+@pytest.mark.asyncio
+async def test_an_account_without_a_business_is_not_a_failure():
+    api, calls = _graph([{"id": "1001", "name": "Only page"}])  # act_555 has no business here
+    out = await _create(api)
+    assert out["facebook_page_id_used"] == "1001"

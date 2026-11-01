@@ -1238,12 +1238,24 @@ async def _resolve_page_id_for_creative(
     except Exception as exc:  # noqa: BLE001
         discovery = {"pages": [], "failures": [{"source": "page discovery", "reason": type(exc).__name__}]}
     pages = [p for p in discovery.get("pages", []) if not p.get("error")]
-    if len(pages) == 1:
+    failures = discovery.get("failures") or []
+    # Only when every source answered: one Page seen while another source failed is "one we
+    # could see", not "the only one" (Errata, ADS-58 r2).
+    if len(pages) == 1 and not failures:
         return str(pages[0]["id"]), None
     listed = [
         {"facebook_page_id": p.get("id"), "name": p.get("name", "Unknown"), "found_via": p.get("source")}
         for p in pages[:20]
     ]
+    if failures:
+        return None, {
+            "error": (
+                "facebook_page_id was left out, and not every place Pages are listed could be read just now, so the "
+                "connector won't pick one. Nothing was created. Pass facebook_page_id."
+            ),
+            "pages": listed,
+            "unreadable_sources": [f.get("source") for f in failures],
+        }
     if not pages:
         return None, {
             "error": "facebook_page_id was left out and no Facebook Page could be found for this account. Nothing was created.",
@@ -1299,8 +1311,9 @@ async def create_ad_creative(
 
     Identity fields:
       * `facebook_page_id` — the Page the ad runs under. Give it. If it's left out it is
-        filled in only when the token can see exactly one Page; with more, the call is
-        refused and the reply lists them (use list_account_pages to see them first).
+        filled in only when every place Pages are listed answered and they show exactly
+        one Page; otherwise the call is refused and the reply lists what it found (use
+        list_account_pages to see them first).
         The reply's `facebook_page_id_used` says which Page was used.
       * `instagram_user_id` — required for IG delivery (`instagram_actor_id`
         deprecated all-versions Sep 9, 2025).
@@ -1656,10 +1669,25 @@ async def update_ad_creative(
     return _json(result if isinstance(result, dict) else {"data": result})
 
 
+def _graph_failed(payload: Any) -> bool:
+    """make_api_request returns Graph errors as {"error": ...} dicts instead of raising."""
+    return not isinstance(payload, dict) or bool(payload.get("error"))
+
+
+def _graph_failure_reason(payload: Any) -> str:
+    err = payload.get("error") if isinstance(payload, dict) else None
+    if isinstance(err, dict):
+        inner = (err.get("details") or {}).get("error") if isinstance(err.get("details"), dict) else None
+        code = (inner or err).get("code") if isinstance(inner or err, dict) else None
+        return f"Graph error{f' {code}' if code is not None else ''}: {str(err.get('message', ''))[:120]}"
+    return "unexpected reply"
+
+
 async def _collect_account_page_candidates(ad_account_id: str, meta_access_token: str) -> Dict[str, Any]:
     normalized_account_id = _normalize_ad_account_id(ad_account_id)
     pages: List[Dict[str, Any]] = []
     failures: List[Dict[str, str]] = []
+    notes: List[Dict[str, str]] = []
     seen_ids: set = set()
 
     def add_candidate(page: Dict[str, Any], source: str, confidence: str) -> None:
@@ -1693,6 +1721,8 @@ async def _collect_account_page_candidates(ad_account_id: str, meta_access_token
 
     try:
         payload = await make_api_request("me/accounts", meta_access_token, {"fields": _PAGE_FIELDS, "page_size": 200})
+        if _graph_failed(payload):
+            add_failure("me/accounts", _graph_failure_reason(payload))
         for row in payload.get("data", []) if isinstance(payload, dict) else []:
             add_candidate(row, "me/accounts", "primary_documented")
     except Exception as exc:  # noqa: BLE001
@@ -1700,6 +1730,8 @@ async def _collect_account_page_candidates(ad_account_id: str, meta_access_token
 
     try:
         account_payload = await make_api_request(normalized_account_id, meta_access_token, {"fields": "business{id,name}"})
+        if _graph_failed(account_payload):
+            add_failure("ad_account/business", _graph_failure_reason(account_payload))
         business = account_payload.get("business") if isinstance(account_payload, dict) else None
         business_id = None
         if isinstance(business, dict):
@@ -1713,10 +1745,13 @@ async def _collect_account_page_candidates(ad_account_id: str, meta_access_token
                 meta_access_token,
                 {"fields": _PAGE_FIELDS, "page_size": 200},
             )
+            if _graph_failed(owned_payload):
+                add_failure("business/owned_pages", _graph_failure_reason(owned_payload))
             for row in owned_payload.get("data", []) if isinstance(owned_payload, dict) else []:
                 add_candidate(row, "business/owned_pages", "primary_documented")
         else:
-            add_failure("business/owned_pages", "Ad account is not linked to a business object")
+            # Not a failure: the account simply has no business, so there are no owned pages to miss.
+            notes.append({"source": "business/owned_pages", "note": "Ad account is not linked to a business object"})
     except Exception as exc:  # noqa: BLE001
         add_failure("business/owned_pages", str(exc))
 
@@ -1726,6 +1761,8 @@ async def _collect_account_page_candidates(ad_account_id: str, meta_access_token
     ):
         try:
             payload = await make_api_request(edge, meta_access_token, {"fields": _PAGE_FIELDS, "page_size": 200})
+            if _graph_failed(payload):
+                add_failure(source, _graph_failure_reason(payload))
             for row in payload.get("data", []) if isinstance(payload, dict) else []:
                 add_candidate(row, source, "secondary_fallback")
         except Exception as exc:  # noqa: BLE001
@@ -1737,6 +1774,8 @@ async def _collect_account_page_candidates(ad_account_id: str, meta_access_token
             meta_access_token,
             {"fields": "id,tracking_specs", "page_size": 100},
         )
+        if _graph_failed(ads_payload):
+            add_failure("ads/tracking_specs", _graph_failure_reason(ads_payload))
         tracking_ids: set = set()
         for ad in ads_payload.get("data", []) if isinstance(ads_payload, dict) else []:
             specs = ad.get("tracking_specs", []) if isinstance(ad, dict) else []
@@ -1760,6 +1799,8 @@ async def _collect_account_page_candidates(ad_account_id: str, meta_access_token
             meta_access_token,
             {"fields": "id,object_story_spec", "page_size": 100},
         )
+        if _graph_failed(creative_payload):
+            add_failure("adcreatives/object_story_spec", _graph_failure_reason(creative_payload))
         story_ids: set = set()
         for creative in creative_payload.get("data", []) if isinstance(creative_payload, dict) else []:
             if not isinstance(creative, dict):
@@ -1782,6 +1823,7 @@ async def _collect_account_page_candidates(ad_account_id: str, meta_access_token
     return {
         "pages": pages,
         "failures": failures,
+        "notes": notes,
         "source_counts": source_counts,
     }
 
