@@ -18,7 +18,10 @@ from .media_helpers import log_startup_config, logger
 
 
 class _ArmavitaFastMCP(FastMCP):
-    """FastMCP with one HTTP-mode guard on calls that come from the client.
+    """FastMCP with two guards on calls that come from the client.
+
+    Unknown arguments are refused in every mode: the SDK would otherwise ignore them
+    and run the tool as if they hadn't been sent (ADS-57).
 
     In HTTP mode a Meta token must arrive only in the request's Authorization
     header. A token passed as the `meta_access_token` tool argument would have
@@ -31,7 +34,22 @@ class _ArmavitaFastMCP(FastMCP):
             problem = http_mode.argument_problem(arguments or {})
             if problem:
                 raise ToolError(problem)
+        unknown = self._unknown_arguments(name, arguments or {})
+        if unknown:
+            # The SDK would drop these silently and run the tool anyway: a clone with a
+            # "new_daily_budget" it never applied, reported as success (ADS-57). Refuse instead.
+            raise ToolError(
+                f"{name} doesn't take {', '.join(sorted(unknown))}. Nothing was done. "
+                "Check the tool's parameters and call it again without them."
+            )
         return await super().call_tool(name, arguments)
+
+    def _unknown_arguments(self, name: str, arguments: dict[str, Any]) -> set[str]:
+        tool = self._tool_manager.get_tool(name)
+        if tool is None:
+            return set()  # the SDK reports an unknown tool itself
+        properties = (tool.parameters or {}).get("properties") or {}
+        return {key for key in arguments if key not in properties}
 
 
 mcp_server = _ArmavitaFastMCP("meta-ads")
