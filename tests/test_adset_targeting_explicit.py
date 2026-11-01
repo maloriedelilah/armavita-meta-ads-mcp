@@ -141,3 +141,112 @@ async def test_a_complete_replacement_is_sent_and_echoed():
         out = _out(await update_ad_set(ad_set_id="as_1", meta_access_token="token", targeting=dict(CURRENT)))
     assert json.loads(api.call_args.args[2]["targeting"]) == CURRENT
     assert out["targeting_sent"] == CURRENT
+
+
+# --- review round 2 (Errata, ADS-56) -------------------------------------------------
+
+
+def _patching(current):
+    calls = []
+
+    async def api(endpoint, token, params, method="GET"):
+        calls.append((endpoint, dict(params), method))
+        if method == "GET":
+            return {"id": "as_1", "targeting": json.loads(json.dumps(current))}
+        return {"success": True}
+
+    return api, calls
+
+
+async def _patch(current, patch):
+    api, calls = _patching(current)
+    with patch_api(api):
+        out = _out(await update_ad_set(ad_set_id="as_1", meta_access_token="token", targeting_patch=patch))
+    posts = [c for c in calls if c[2] == "POST"]
+    sent = json.loads(posts[0][1]["targeting"]) if posts else None
+    return out, sent
+
+
+def patch_api(api):
+    return patch(_API, side_effect=api)
+
+
+@pytest.mark.asyncio
+async def test_a_geo_patch_adds_to_the_geo_and_keeps_countries_and_location_types():
+    out, sent = await _patch(CURRENT, {"geo_locations": {"cities": [{"key": "296875", "radius": 25, "distance_unit": "kilometer"}]}})
+    assert sent["geo_locations"] == {
+        "countries": ["GB"], "location_types": ["home", "recent"],
+        "cities": [{"key": "296875", "radius": 25, "distance_unit": "kilometer"}],
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_geo_sub_key_set_to_null_is_removed():
+    current = dict(CURRENT, geo_locations={"countries": ["GB"], "cities": [{"key": "1"}], "location_types": ["home"]})
+    out, sent = await _patch(current, {"geo_locations": {"cities": None}})
+    assert sent["geo_locations"] == {"countries": ["GB"], "location_types": ["home"]}
+
+
+@pytest.mark.asyncio
+async def test_removing_every_place_from_the_geo_is_refused():
+    out, sent = await _patch(CURRENT, {"geo_locations": {"countries": None}})
+    assert sent is None and "no geo_locations with a place" in out["error"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", [None, "off", 0])
+async def test_targeting_automation_cant_be_removed_by_a_patch(value):
+    out, sent = await _patch(CURRENT, {"targeting_automation": value})
+    assert sent is None and "targeting_automation can't be removed" in out["error"]
+
+
+@pytest.mark.asyncio
+async def test_targeting_automation_can_be_changed_by_a_patch():
+    out, sent = await _patch(CURRENT, {"targeting_automation": {"advantage_audience": 1}})
+    assert sent["targeting_automation"] == {"advantage_audience": 1}
+
+
+@pytest.mark.asyncio
+async def test_a_spec_without_advantage_state_must_get_one_in_the_patch():
+    current = {k: v for k, v in CURRENT.items() if k != "targeting_automation"}
+    out, sent = await _patch(current, {"age_min": 25})
+    assert sent is None and "targeting_automation must be set" in out["error"]
+    out, sent = await _patch(current, {"age_min": 25, "targeting_automation": {"advantage_audience": 0}})
+    assert sent["age_min"] == 25 and sent["targeting_automation"] == {"advantage_audience": 0}
+
+
+@pytest.mark.asyncio
+async def test_a_read_back_age_range_doesnt_contradict_a_patched_age_min():
+    current = dict(CURRENT, age_range=[35, 65])
+    out, sent = await _patch(current, {"age_min": 25})
+    assert sent["age_min"] == 25 and "age_range" not in sent
+
+
+@pytest.mark.asyncio
+async def test_legacy_exclusions_mean_a_patch_is_refused_not_silently_dropped():
+    current = dict(CURRENT, exclusions={"interests": [{"id": "1"}]})
+    out, sent = await _patch(current, {"age_min": 25})
+    assert sent is None and "legacy `exclusions`" in out["error"]
+
+
+@pytest.mark.asyncio
+async def test_a_null_targeting_automation_in_a_full_replacement_is_refused():
+    with patch(_API, new_callable=AsyncMock) as api:
+        out = _out(await update_ad_set(
+            ad_set_id="as_1", meta_access_token="token", targeting=dict(CURRENT, targeting_automation=None),
+        ))
+    assert "targeting_automation must be set" in out["error"] and api.call_count == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "targeting, words",
+    [
+        ({"geo_locations": {"location_types": ["home"]}, "targeting_automation": {"advantage_audience": 0}}, "with a place"),
+        ("US", "must be an object"),
+    ],
+)
+async def test_lows_location_types_alone_and_a_string_spec(targeting, words):
+    with patch(_API, new_callable=AsyncMock) as api:
+        out = _out(await update_ad_set(ad_set_id="as_1", meta_access_token="token", targeting=targeting))
+    assert words in out["error"] and api.call_count == 0

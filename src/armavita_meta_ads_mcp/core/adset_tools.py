@@ -141,14 +141,74 @@ _TARGETING_REQUIRED = (
 )
 
 
+# The geo_locations keys that name an actual place (location_types alone doesn't).
+_GEO_PLACE_KEYS = ("countries", "regions", "cities", "zips", "geo_markets", "electoral_districts",
+                   "custom_locations", "places", "country_groups", "large_geo_areas", "medium_geo_areas",
+                   "small_geo_areas", "metro_areas", "neighborhoods", "subneighborhoods", "subcities")
+
+
 def _targeting_problem(targeting: Any) -> Optional[str]:
     """Why a targeting spec can't be sent as a whole spec, or None."""
-    if not isinstance(targeting, dict) or not targeting:
+    if not isinstance(targeting, dict):
+        return "targeting must be an object (a JSON dict)"
+    if not targeting:
         return "targeting is empty"
     geo = targeting.get("geo_locations")
-    if not isinstance(geo, dict) or not any(geo.get(k) for k in geo):
-        return "targeting has no geo_locations"
+    if not isinstance(geo, dict) or not any(geo.get(k) for k in _GEO_PLACE_KEYS):
+        return "targeting has no geo_locations with a place in it (countries, regions, cities, zips...)"
     return None
+
+
+def _advantage_problem(targeting: Dict[str, Any]) -> Optional[str]:
+    """targeting_automation must be stated: leaving it out (or null) can switch Advantage+
+    audience on or off without anyone deciding to."""
+    auto = targeting.get("targeting_automation")
+    if not isinstance(auto, dict) or "advantage_audience" not in auto:
+        return (
+            "targeting_automation must be set, e.g. {\"advantage_audience\": 0} (or 1): without it "
+            "Advantage+ audience can be switched on or off without anyone deciding to"
+        )
+    return None
+
+
+def _apply_targeting_patch(current: Dict[str, Any], patch: Dict[str, Any]) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Merge a patch into the current spec. Returns (merged, None) or (None, why it was refused).
+
+    - Top-level keys are set; a key set to null is removed.
+    - geo_locations is merged one level down: {"cities": [...]} adds or changes cities and keeps
+      countries and location_types; a sub-key set to null is removed (ADS-56 review).
+    - targeting_automation can't be removed or nulled; give its new value instead.
+    - Setting age_min/age_max drops a read-back age_range (and the reverse), so the two
+      can't contradict each other.
+    """
+    if "targeting_automation" in patch and not isinstance(patch["targeting_automation"], dict):
+        return None, "targeting_automation can't be removed or set to null in a patch; give {\"advantage_audience\": 0} or 1"
+    if "exclusions" in current:
+        return None, (
+            "this ad set's targeting has legacy `exclusions`, which Meta no longer accepts on write; a patch "
+            "would drop them silently. Send a full `targeting` spec (with excluded_custom_audiences) instead"
+        )
+    merged = dict(current)
+    for key, value in patch.items():
+        if key == "geo_locations" and isinstance(value, dict):
+            geo = dict(merged.get("geo_locations") or {})
+            for sub, sub_value in value.items():
+                if sub_value is None:
+                    geo.pop(sub, None)
+                else:
+                    geo[sub] = sub_value
+            merged["geo_locations"] = geo
+        elif value is None:
+            merged.pop(key, None)
+        else:
+            merged[key] = value
+    if ("age_min" in patch or "age_max" in patch) and "age_range" not in patch:
+        merged.pop("age_range", None)
+    if "age_range" in patch:
+        for k in ("age_min", "age_max"):
+            if k not in patch:
+                merged.pop(k, None)
+    return merged, None
 
 
 _REJECTED_TARGETING_EXCLUSION_KEYS = {"exclusions"}
@@ -570,10 +630,13 @@ async def update_ad_set(
       must include `geo_locations` and `targeting_automation`
       (`{"advantage_audience": 0}` or `1`), so the audience and Advantage+ state
       are always stated, never dropped by accident.
-    - `targeting_patch` changes only the top-level keys you give: the bridge
-      reads the current spec, sets those keys (a key set to null is removed), and
-      writes the result. E.g. `{"age_min": 25}` changes the minimum age and keeps
-      everything else.
+    - `targeting_patch` changes only the keys you give: it reads the current
+      spec, sets those keys (a key set to null is removed), and writes the result.
+      E.g. `{"age_min": 25}` changes the minimum age and keeps everything else.
+      `geo_locations` is merged one level down: `{"geo_locations": {"cities":
+      [...]}}` sets the cities and KEEPS the countries and location_types already
+      there (set a sub-key to null to remove it, e.g. `{"countries": null}`).
+      `targeting_automation` can be changed in a patch but never removed.
     The reply's `targeting_sent` is the exact spec sent to Meta.
 
     `value_rule_set_id`:
@@ -645,12 +708,9 @@ async def update_ad_set(
                 "error": "Couldn't read the ad set's current targeting, so the patch wasn't applied. Nothing was changed.",
                 **({"details": current} if isinstance(current, dict) and current.get("error") else {}),
             })
-        merged = dict(current_targeting)
-        for key, value in targeting_patch.items():
-            if value is None:
-                merged.pop(key, None)
-            else:
-                merged[key] = value
+        merged, refusal = _apply_targeting_patch(current_targeting, targeting_patch)
+        if refusal:
+            return _json({"error": f"{refusal}. Nothing was changed."})
         targeting = merged
     elif targeting is not None:
         problem = _targeting_problem(targeting)
@@ -659,14 +719,13 @@ async def update_ad_set(
                 f"{problem}. `targeting` replaces the WHOLE spec, so this would remove the ad set's audience. "
                 "Nothing was changed. To change only some keys, use targeting_patch (e.g. {\"age_min\": 25})."
             )})
-        if "targeting_automation" not in targeting:
+        advantage = _advantage_problem(targeting)
+        if advantage:
             return _json({"error": (
-                "targeting has no targeting_automation. `targeting` replaces the whole spec, and leaving it out "
-                "can switch Advantage+ audience on or off without anyone deciding to. Nothing was changed. Include "
-                "\"targeting_automation\": {\"advantage_audience\": 0} (or 1), or use targeting_patch."
+                f"{advantage}. `targeting` replaces the whole spec. Nothing was changed. Include it, or use targeting_patch."
             )})
     if targeting is not None:
-        problem = _targeting_problem(targeting)
+        problem = _targeting_problem(targeting) or _advantage_problem(targeting)
         if problem:
             return _json({"error": f"After the patch, {problem}. Nothing was changed."})
         cleaned_targeting, exclusion_warning = _strip_targeting_exclusions(targeting)
