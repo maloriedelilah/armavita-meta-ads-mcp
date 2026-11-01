@@ -7,7 +7,7 @@
 import json
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from . import status_policy
+from . import money, status_policy
 from .graph_client import make_api_request, meta_api_tool
 from .meta_v25_guards import (
     detect_deprecated_advantage_plus_block,
@@ -61,6 +61,28 @@ def _normalize_special_ad_categories(values: Optional[List[str]]) -> Tuple[Optio
         return [], None
 
     return deduped, None
+
+
+def _budget_arguments_problem(
+    daily_budget: Any, lifetime_budget: Any, spend_cap: Any, use_ad_set_level_budgets: bool
+) -> Optional[str]:
+    """ADS-60: amounts in range, and no budget arguments that contradict each other."""
+    problem = money.first_problem(
+        money.amount_problem("daily_budget", daily_budget),
+        money.amount_problem("lifetime_budget", lifetime_budget),
+        money.spend_cap_problem(spend_cap),
+    )
+    if problem:
+        return problem
+    if daily_budget is not None and lifetime_budget is not None:
+        return "Pass daily_budget or lifetime_budget, not both. Nothing was changed."
+    if use_ad_set_level_budgets and (daily_budget is not None or lifetime_budget is not None):
+        return (
+            "use_ad_set_level_budgets=true moves the budget to the ad sets and clears the campaign budget, "
+            "so it can't be combined with daily_budget or lifetime_budget. Set the budgets on the ad sets "
+            "instead. Nothing was changed."
+        )
+    return None
 
 
 def _validate_bid_strategy(bid_strategy: Optional[str]) -> Optional[Dict[str, Any]]:
@@ -164,9 +186,16 @@ async def create_campaign(
 ) -> str:
     """Create a campaign with optional budgeting and bid controls.
 
-    Budgeting: pass `daily_budget`/`lifetime_budget` for campaign-level budget, or set
-    `use_ad_set_level_budgets=True` for ad-set budgets. If neither is provided, the
-    request fails unless `apply_default_budget=True` (applies `daily_budget=1000`).
+    Money: `daily_budget`, `lifetime_budget` and `spend_cap` are whole numbers in the ad
+    account's minor currency units, as Graph takes them: cents for USD, EUR, GBP, CAD, AUD
+    (1000 = 10.00), but whole units for currencies without cents such as JPY and KRW
+    (1000 = 1,000 yen). read_ad_account shows the account's currency. Each must be more
+    than 0; `spend_cap` may also be 922337203685478, Graph's value for no cap.
+
+    Budgeting: pass ONE of `daily_budget`/`lifetime_budget` for a campaign-level budget, or
+    set `use_ad_set_level_budgets=True` for ad-set budgets (then pass no campaign budget).
+    If none is given, the request fails unless `apply_default_budget=True` (applies
+    `daily_budget=1000`, i.e. 10.00 in a cents currency but 1,000 yen in JPY).
 
     For ad-set-level budgets, `is_adset_budget_sharing_enabled` defaults to `True`
     (Meta's recommendation in v24.0+). Override via `is_adset_budget_sharing_enabled=False`.
@@ -192,6 +221,10 @@ async def create_campaign(
     bid_error = _validate_bid_strategy(bid_strategy)
     if bid_error:
         return _json(bid_error)
+
+    money_error = _budget_arguments_problem(daily_budget, lifetime_budget, spend_cap, use_ad_set_level_budgets)
+    if money_error:
+        return _json({"error": money_error})
 
     advantage_plus_block = detect_deprecated_advantage_plus_block(
         {
@@ -328,8 +361,20 @@ async def update_campaign(
     special_ad_category_country: Optional[List[str]] = None,
     migrate_to_advantage_plus: Optional[bool] = None,
     bid_constraints: Optional[Dict[str, Any]] = None,
+    confirm_budget_increase: Optional[bool] = None,
 ) -> str:
-    """Update campaign settings for an existing campaign."""
+    """Update campaign settings for an existing campaign.
+
+    Money: `daily_budget`, `lifetime_budget` and `spend_cap` are whole numbers in the ad
+    account's minor currency units (cents for USD, EUR, GBP, CAD, AUD, so 1000 = 10.00; whole
+    units for JPY, KRW and other currencies without cents). read_ad_account shows the currency.
+    Each must be more than 0; `spend_cap` may also be 922337203685478 (Graph's "no cap").
+    A budget change takes effect at once on a running campaign. Raising a budget to more
+    than 3x its current value is refused unless `confirm_budget_increase=true`.
+
+    `use_ad_set_level_budgets=true` clears the campaign budget (moving budgets to the ad
+    sets), so it can't be combined with `daily_budget` or `lifetime_budget`.
+    """
     status, status_error = status_policy.update_status(status)
     if status_error:
         return _json({"error": status_error})
@@ -339,6 +384,22 @@ async def update_campaign(
     bid_error = _validate_bid_strategy(bid_strategy)
     if bid_error:
         return _json(bid_error)
+
+    money_error = _budget_arguments_problem(daily_budget, lifetime_budget, spend_cap, bool(use_ad_set_level_budgets))
+    if money_error:
+        return _json({"error": money_error})
+
+    new_budgets = {k: v for k, v in (("daily_budget", daily_budget), ("lifetime_budget", lifetime_budget)) if v is not None}
+    increase_check = None
+    if new_budgets and not confirm_budget_increase:
+        current = await make_api_request(campaign_id, meta_access_token, {"fields": "daily_budget,lifetime_budget"})
+        if isinstance(current, dict) and "error" not in current:
+            increase_error = money.increase_problems(current, new_budgets, bool(confirm_budget_increase))
+            if increase_error:
+                return _json({"error": increase_error})
+            increase_check = "passed"
+        else:
+            increase_check = "skipped: the current budget couldn't be read"
 
     payload: Dict[str, Any] = {}
 
@@ -371,9 +432,9 @@ async def update_campaign(
 
     if use_ad_set_level_budgets is not True:
         if daily_budget is not None:
-            payload["daily_budget"] = "" if daily_budget == "" else str(daily_budget)
+            payload["daily_budget"] = str(daily_budget)
         if lifetime_budget is not None:
-            payload["lifetime_budget"] = "" if lifetime_budget == "" else str(lifetime_budget)
+            payload["lifetime_budget"] = str(lifetime_budget)
 
     # v25: these are not writable Campaign fields (see create_campaign); drop + warn.
     ignored_warnings: List[Dict[str, Any]] = []
@@ -421,6 +482,8 @@ async def update_campaign(
         if use_ad_set_level_budgets is True:
             result["budget_strategy"] = "ad_set_level"
             result["note"] = "Campaign updated to use ad set level budgets."
+        if increase_check:
+            result["budget_increase_check"] = increase_check
         if ignored_warnings:
             existing = result.get("warnings")
             result["warnings"] = (existing + ignored_warnings) if isinstance(existing, list) else ignored_warnings

@@ -7,7 +7,7 @@
 import json
 from typing import Any, Dict, List, Optional
 
-from . import status_policy
+from . import money, status_policy
 from .graph_client import make_api_request, meta_api_tool
 from .graph_constants import META_GRAPH_API_VERSION
 from .mcp_runtime import mcp_server
@@ -290,6 +290,20 @@ def _normalize_targeting(targeting: Optional[Dict[str, Any]]) -> tuple[Dict[str,
     return normalized, _combine_warnings(exclusion_warning, placement_warning)
 
 
+def _money_problem(daily_budget: Any, lifetime_budget: Any, bid_amount: Any) -> Optional[str]:
+    """ADS-60: budgets and bids in range, and not both kinds of budget at once."""
+    problem = money.first_problem(
+        money.amount_problem("daily_budget", daily_budget),
+        money.amount_problem("lifetime_budget", lifetime_budget),
+        money.amount_problem("bid_amount", bid_amount),
+    )
+    if problem:
+        return problem
+    if daily_budget is not None and lifetime_budget is not None:
+        return "Pass daily_budget or lifetime_budget, not both. Nothing was changed."
+    return None
+
+
 async def _parent_campaign_bid_strategy(campaign_id: str, meta_access_token: str) -> Optional[str]:
     payload = await make_api_request(campaign_id, meta_access_token, {"fields": "bid_strategy"})
     if isinstance(payload, dict):
@@ -376,6 +390,13 @@ async def create_ad_set(
 ) -> str:
     """Create an ad set under a campaign.
 
+    Money: `daily_budget`, `lifetime_budget` and `bid_amount` are whole numbers in the ad
+    account's minor currency units, as Graph takes them: cents for USD, EUR, GBP, CAD, AUD
+    (1000 = 10.00), but whole units for currencies without cents such as JPY and KRW
+    (1000 = 1,000 yen). read_ad_account shows the account's currency. Each must be more
+    than 0. Pass one of daily_budget or lifetime_budget, and neither when the campaign
+    holds the budget.
+
     `value_rule_set_id` attaches one of the account's value rule sets (from
     `list_value_rule_sets`) to the new ad set.
 
@@ -414,6 +435,10 @@ async def create_ad_set(
     if bid_error:
         return _json(bid_error)
 
+    money_error = _money_problem(daily_budget, lifetime_budget, bid_amount)
+    if money_error:
+        return _json({"error": money_error})
+
     normalized_bid_strategy = _normalize_bid_strategy(bid_strategy)
 
     if bid_amount is None:
@@ -429,7 +454,7 @@ async def create_ad_set(
                         f"bid_amount is required because the parent campaign uses bid_strategy "
                         f"'{parent_strategy}'"
                     ),
-                    "details": "Provide bid_amount in cents or update parent campaign strategy.",
+                    "details": f"Provide bid_amount ({money.UNITS}) or update the parent campaign's strategy.",
                     "example_with_bid_amount": {"bid_amount": 500},
                 }
             )
@@ -542,6 +567,7 @@ async def update_ad_set(
     dsa_beneficiary: Optional[str] = None,
     dsa_payor: Optional[str] = None,
     value_rule_set_id: Optional[str] = _KEEP_VALUE_RULE_SET,
+    confirm_budget_increase: Optional[bool] = None,
     meta_access_token: Optional[str] = None,
 ) -> str:
     """Update an ad set's delivery, budgeting, and targeting configuration.
@@ -555,6 +581,13 @@ async def update_ad_set(
       never silently strip a value rule. Pass "" to detach.
     The result says what happened to the value rule set. Read the ad set back
     afterwards: `read_ad_set` returns `value_rule_set_id`.
+
+    Money: `daily_budget`, `lifetime_budget` and `bid_amount` are whole numbers in the ad
+    account's minor currency units (cents for USD, EUR, GBP, CAD, AUD, so 1000 = 10.00; whole
+    units for JPY, KRW and other currencies without cents). read_ad_account shows the
+    currency. Each must be more than 0. A budget change takes effect at once on a running ad
+    set. Raising a budget to more than 3x its current value is refused unless
+    `confirm_budget_increase=true`.
     """
     status, status_error = status_policy.update_status(status)
     if status_error:
@@ -580,6 +613,22 @@ async def update_ad_set(
     bid_error = _validate_bid_controls(bid_strategy, bid_amount, bid_constraints)
     if bid_error:
         return _json(bid_error)
+
+    money_error = _money_problem(daily_budget, lifetime_budget, bid_amount)
+    if money_error:
+        return _json({"error": money_error})
+
+    new_budgets = {k: v for k, v in (("daily_budget", daily_budget), ("lifetime_budget", lifetime_budget)) if v is not None}
+    increase_check: Optional[str] = None
+    if new_budgets and not confirm_budget_increase:
+        current = await make_api_request(ad_set_id, meta_access_token, {"fields": "daily_budget,lifetime_budget"})
+        if isinstance(current, dict) and "error" not in current:
+            increase_error = money.increase_problems(current, new_budgets, bool(confirm_budget_increase))
+            if increase_error:
+                return _json({"error": increase_error})
+            increase_check = "passed"
+        else:
+            increase_check = "skipped: the current budget couldn't be read"
 
     if optimization_goal == "APP_INSTALLS":
         app_error = _validate_promoted_object_for_app_installs(optimization_goal, promoted_object)
@@ -659,6 +708,8 @@ async def update_ad_set(
                 # Say what happened, so a detach is never silent in the reply.
                 sent = payload["value_rule_set_id"]
                 result["value_rule_set"] = {"detached": True} if sent == "" else {"attached": sent}
+            if increase_check:
+                result["budget_increase_check"] = increase_check
             if dropped_fields_warning:
                 existing = result.get("warnings")
                 result["warnings"] = (

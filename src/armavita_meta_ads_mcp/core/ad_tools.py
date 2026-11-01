@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from mcp.server.fastmcp import Image
 
-from . import status_policy
+from . import money, status_policy
 from . import http_mode
 from . import image_limits
 from .graph_client import McpToolError, make_api_request, meta_api_tool
@@ -619,7 +619,12 @@ async def create_ad(
 
     Requires an `ad_creative_id` (from create_ad_creative). Defaults to PAUSED
     status. `conversion_domain` is required for some website-conversion ads;
-    `bid_amount` (minor units) and `tracking_specs` are optional.
+    `bid_amount` and `tracking_specs` are optional.
+
+    `bid_amount` is a whole number in the ad account's minor currency units, as Graph takes
+    them: cents for USD, EUR, GBP, CAD, AUD (1000 = 10.00), but whole units for currencies
+    without cents such as JPY and KRW (1000 = 1,000 yen). It must be more than 0.
+    read_ad_account shows the account's currency.
     """
     status, status_error = status_policy.create_status(status)
     if status_error:
@@ -632,6 +637,9 @@ async def create_ad(
         return _json({"error": "No ad set ID provided"})
     if not ad_creative_id:
         return _json({"error": "No creative ID provided"})
+    bid_error = money.amount_problem("bid_amount", bid_amount)
+    if bid_error:
+        return _json({"error": bid_error})
 
     payload: Dict[str, Any] = {
         "name": name,
@@ -765,12 +773,20 @@ async def update_ad(
     Pass `ad_creative_id` to swap the ad's creative. To change creative *content*
     (text/image/URL), build a new creative with create_ad_creative first, then
     pass its id here.
+
+    `bid_amount` is a whole number in the ad account's minor currency units (cents for USD,
+    EUR, GBP, CAD, AUD, so 1000 = 10.00; whole units for JPY, KRW and other currencies without
+    cents); read_ad_account shows the account's currency. It must be more than 0 and takes
+    effect at once on a running ad.
     """
     status, status_error = status_policy.update_status(status)
     if status_error:
         return _json({"error": status_error})
     if not ad_id:
         return _json({"error": "Ad ID is required"})
+    bid_error = money.amount_problem("bid_amount", bid_amount)
+    if bid_error:
+        return _json({"error": bid_error})
 
     payload: Dict[str, Any] = {}
     if status is not None:
