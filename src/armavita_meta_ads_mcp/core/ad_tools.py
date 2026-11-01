@@ -1224,22 +1224,41 @@ async def _resolve_page_id_for_creative(
     meta_access_token: str,
     facebook_page_id: Optional[str],
 ) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
-    if facebook_page_id:
-        return str(facebook_page_id), None
+    """The Page the ad will run under (ADS-58).
 
-    discovery = await _discover_pages_for_account(ad_account_id, meta_access_token)
-    if not discovery.get("success"):
+    Given: used as is. Omitted: used only when the token can see exactly one Page. With
+    more than one, nothing is guessed: picking the first of me/accounts ran a client's ad
+    under the wrong Page when one token manages several clients. The reply lists them.
+    """
+    if facebook_page_id:
+        return str(facebook_page_id).strip(), None
+
+    try:
+        discovery = await _collect_account_page_candidates(ad_account_id, meta_access_token)
+    except Exception as exc:  # noqa: BLE001
+        discovery = {"pages": [], "failures": [{"source": "page discovery", "reason": type(exc).__name__}]}
+    pages = [p for p in discovery.get("pages", []) if not p.get("error")]
+    if len(pages) == 1:
+        return str(pages[0]["id"]), None
+    listed = [
+        {"facebook_page_id": p.get("id"), "name": p.get("name", "Unknown"), "found_via": p.get("source")}
+        for p in pages[:20]
+    ]
+    if not pages:
         return None, {
-            "error": "page_id was omitted and no usable Facebook Page could be discovered on this account",
-            "details": discovery.get("message", "Page discovery failed"),
+            "error": "facebook_page_id was left out and no Facebook Page could be found for this account. Nothing was created.",
             "suggestions": [
-                "Use list_account_pages to list available pages.",
-                "Use search_pages to filter by page name.",
-                "Provide facebook_page_id explicitly.",
+                "Use list_account_pages to see the Pages this token can use.",
+                "Pass facebook_page_id: the Page the ad should run under.",
             ],
         }
-
-    return str(discovery["facebook_page_id"]), None
+    return None, {
+        "error": (
+            f"facebook_page_id was left out and this token can use {len(pages)} Pages, so the connector won't guess "
+            "which one the ad should run under. Nothing was created. Pass facebook_page_id."
+        ),
+        "pages": listed,
+    }
 
 
 @mcp_server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True))
@@ -1279,7 +1298,10 @@ async def create_ad_creative(
     """Create an ad creative.
 
     Identity fields:
-      * `facebook_page_id` (auto-discovered if omitted) — required for FB delivery.
+      * `facebook_page_id` — the Page the ad runs under. Give it. If it's left out it is
+        filled in only when the token can see exactly one Page; with more, the call is
+        refused and the reply lists them (use list_account_pages to see them first).
+        The reply's `facebook_page_id_used` says which Page was used.
       * `instagram_user_id` — required for IG delivery (`instagram_actor_id`
         deprecated all-versions Sep 9, 2025).
       * `threads_user_id` — required for Threads delivery; obtain via
@@ -1479,7 +1501,13 @@ async def create_ad_creative(
     if isinstance(creation_result, dict) and creation_result.get("id"):
         ad_creative_id = creation_result["id"]
         details = await make_api_request(ad_creative_id, meta_access_token, {"fields": _CREATIVE_FIELDS.replace(",image_urls_for_viewing", "")})
-        return _json({"success": True, "ad_creative_id": ad_creative_id, "details": details})
+        return _json({
+            "success": True,
+            "ad_creative_id": ad_creative_id,
+            # Always say which Page the ad runs under (ADS-58).
+            "facebook_page_id_used": resolved_page_id,
+            "details": details,
+        })
 
     return _json(creation_result if isinstance(creation_result, dict) else {"data": creation_result})
 
