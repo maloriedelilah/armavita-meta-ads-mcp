@@ -23,7 +23,6 @@ async def test_clone_campaign_warning_list_has_no_token_option_names():
             meta_access_token="token",
             include_ad_sets=True,
             include_ads=True,
-            include_creatives=True,
         )
 
     payload = json.loads(raw)

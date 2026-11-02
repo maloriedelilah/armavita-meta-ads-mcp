@@ -21,7 +21,7 @@ async def test_update_adset_serializes_dict_fields_before_request():
         raw = await update_ad_set(
             ad_set_id="adset_1",
             meta_access_token="token",
-            targeting={"age_min": 21, "geo_locations": {"countries": ["US"]}},
+            targeting={"age_min": 21, "geo_locations": {"countries": ["US"]}, "targeting_automation": {"advantage_audience": 0}},
             bid_constraints={"roas_average_floor": 20000},
         )
 
@@ -103,6 +103,7 @@ async def test_update_adset_strips_video_feeds_and_exclusions_together():
                 "geo_locations": {"countries": ["US"]},
                 "facebook_positions": ["feed", "video_feeds"],
                 "exclusions": {"interests": [{"id": "123"}]},
+                "targeting_automation": {"advantage_audience": 0},
             },
         )
 

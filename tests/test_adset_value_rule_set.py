@@ -67,6 +67,7 @@ async def test_create_ad_set_sends_value_rule_set_id():
             optimization_goal="LINK_CLICKS",
             billing_event="IMPRESSIONS",
             daily_budget=1000,
+            targeting={"geo_locations": {"countries": ["US"]}},
             meta_access_token="token",
             value_rule_set_id="1439455934496080",
         )
@@ -89,6 +90,7 @@ async def test_create_ad_set_omits_blank_value_rule_set_id():
             optimization_goal="LINK_CLICKS",
             billing_event="IMPRESSIONS",
             daily_budget=1000,
+            targeting={"geo_locations": {"countries": ["US"]}},
             meta_access_token="token",
             value_rule_set_id="",
         )
