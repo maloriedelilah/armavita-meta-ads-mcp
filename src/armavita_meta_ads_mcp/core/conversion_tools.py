@@ -4,8 +4,9 @@
 """Custom conversion CRUD tools."""
 
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
+from . import empties
 from .graph_client import make_api_request, meta_api_tool
 from .mcp_runtime import mcp_server
 from mcp.types import ToolAnnotations
@@ -123,10 +124,18 @@ async def update_custom_conversion(
     advanced_rule: Optional[Dict[str, Any]] = None,
     custom_event_type: Optional[str] = None,
     default_conversion_value: Optional[float] = None,
+    send_empty: Optional[List[str]] = None,
 ) -> str:
-    """Update a custom conversion."""
+    """Update a custom conversion.
+
+    `send_empty`: to clear a field, send it empty AND list its name here (an empty value that
+    isn't listed changes nothing). This tool can clear: description.
+    """
     if not custom_conversion_id:
         return _json({"error": "custom_conversion_id is required"})
+    empty_error = empties.problem(send_empty, ("description",), {"description": description})
+    if empty_error:
+        return _json({"error": empty_error})
 
     payload: Dict[str, Any] = {}
     if name is not None:
@@ -146,4 +155,6 @@ async def update_custom_conversion(
         return _json({"error": "No update parameters provided"})
 
     result = await make_api_request(custom_conversion_id, meta_access_token, payload, method="POST")
+    if send_empty and isinstance(result, dict) and not result.get("error"):
+        result["sent_empty"] = sorted(empties.requested(send_empty))
     return _json(result)

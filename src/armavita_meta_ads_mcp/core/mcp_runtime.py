@@ -13,7 +13,7 @@ from typing import Any, List, Optional
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 
-from . import http_guard, http_mode, log_redaction
+from . import empties, http_guard, http_mode, log_redaction
 from .tool_failures import FailuresAreErrors
 from .auth_state import login as login_auth
 from .media_helpers import log_startup_config, logger
@@ -30,11 +30,12 @@ class _ArmavitaFastMCP(FailuresAreErrors):
     travelled through the agent's context and transcript, so it is refused for
     every tool. Tool-to-tool calls inside the server don't pass through here.
 
-    On tools that change things, a blank string in an optional argument means "not
-    given" (ADS-61). Strict-schema clients fill every unused string field with "", and
-    Graph takes "" as a real value: an enum or ID sent as "", or a field cleared during
-    an unrelated edit. Arguments with a default other than None are left alone; clearing
-    something takes an explicit flag (detach_value_rule_set, clear_end_time).
+    An empty value ("", spaces, [] or {}) in an optional argument means "not given"
+    (ADS-61, ADS-96). Padding clients fill every unused field that way, and Graph takes it as
+    a real value: an enum or ID sent as "", frequency caps or a value rule set cleared during
+    a budget edit. To really clear a field, a tool takes `send_empty` naming it (empties.py),
+    and those fields keep their empty value. Arguments with a default other than None are
+    left alone.
     """
 
     async def call_tool(self, name: str, arguments: dict[str, Any]):
@@ -54,18 +55,19 @@ class _ArmavitaFastMCP(FailuresAreErrors):
 
     def _without_blank_optionals(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         tool = self._tool_manager.get_tool(name)
-        # Cleaned unless the tool is marked read-only, so a write tool someone forgets to
-        # annotate is still covered (Errata's Low on ADS-61).
-        if tool is None or getattr(tool.annotations, "readOnlyHint", None) is True:
+        # Every tool, read-only ones included: a padded "" sent to a read only earns a 400
+        # (Errata's Low on #30), and nothing on a read tool is cleared by an empty value.
+        if tool is None:
             return arguments
         try:
             defaults = {n: p.default for n, p in inspect.signature(tool.fn).parameters.items()}
         except (TypeError, ValueError):
             return arguments
+        keep_empty = set(empties.requested(arguments.get("send_empty")))
         return {
             key: value
             for key, value in arguments.items()
-            if not (isinstance(value, str) and not value.strip() and key in defaults and defaults[key] is None)
+            if not (empties.is_empty(value) and key not in keep_empty and key in defaults and defaults[key] is None)
         }
 
     def _unknown_arguments(self, name: str, arguments: dict[str, Any]) -> set[str]:

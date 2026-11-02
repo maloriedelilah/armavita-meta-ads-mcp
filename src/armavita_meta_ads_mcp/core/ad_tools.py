@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from mcp.server.fastmcp import Image
 
-from . import money, status_policy
+from . import empties, money, status_policy
 from . import http_mode
 from . import image_limits
 from .graph_client import McpToolError, make_api_request, meta_api_tool
@@ -767,8 +767,12 @@ async def update_ad(
     tracking_specs: Optional[List[Dict[str, Any]]] = None,
     ad_creative_id: Optional[str] = None,
     meta_access_token: Optional[str] = None,
+    send_empty: Optional[List[str]] = None,
 ) -> str:
     """Update an existing ad's status, bid_amount, tracking_specs, or creative.
+
+    `send_empty`: to clear a field, send it empty AND list its name here (an empty value that
+    isn't listed changes nothing). This tool can clear: tracking_specs.
 
     Pass `ad_creative_id` to swap the ad's creative. To change creative *content*
     (text/image/URL), build a new creative with create_ad_creative first, then
@@ -787,6 +791,9 @@ async def update_ad(
     bid_error = money.amount_problem("bid_amount", bid_amount)
     if bid_error:
         return _json({"error": bid_error})
+    empty_error = empties.problem(send_empty, ("tracking_specs",), {"tracking_specs": tracking_specs})
+    if empty_error:
+        return _json({"error": empty_error})
 
     payload: Dict[str, Any] = {}
     if status is not None:
@@ -806,6 +813,8 @@ async def update_ad(
         return _json({"error": "No update parameters provided (status, bid_amount, tracking_specs, or ad_creative_id)"})
 
     result = await make_api_request(ad_id, meta_access_token, payload, method="POST")
+    if send_empty and isinstance(result, dict) and not result.get("error"):
+        result["sent_empty"] = sorted(empties.requested(send_empty))
     return _json(result)
 
 
