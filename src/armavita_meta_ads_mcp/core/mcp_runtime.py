@@ -4,6 +4,7 @@
 """FastMCP runtime assembly and CLI entrypoint (stdio by default, streamable HTTP optional)."""
 
 import argparse
+import inspect
 import logging
 import os
 import sys
@@ -27,6 +28,12 @@ class _ArmavitaFastMCP(FastMCP):
     header. A token passed as the `meta_access_token` tool argument would have
     travelled through the agent's context and transcript, so it is refused for
     every tool. Tool-to-tool calls inside the server don't pass through here.
+
+    On tools that change things, a blank string in an optional argument means "not
+    given" (ADS-61). Strict-schema clients fill every unused string field with "", and
+    Graph takes "" as a real value: an enum or ID sent as "", or a field cleared during
+    an unrelated edit. Arguments whose blank value means something on purpose have a
+    default other than None (value_rule_set_id's "keep") and are left alone.
     """
 
     async def call_tool(self, name: str, arguments: dict[str, Any]):
@@ -42,7 +49,21 @@ class _ArmavitaFastMCP(FastMCP):
                 f"{name} doesn't take {', '.join(sorted(unknown))}. Nothing was done. "
                 "Check the tool's parameters and call it again without them."
             )
-        return await super().call_tool(name, arguments)
+        return await super().call_tool(name, self._without_blank_optionals(name, arguments or {}))
+
+    def _without_blank_optionals(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool = self._tool_manager.get_tool(name)
+        if tool is None or getattr(tool.annotations, "readOnlyHint", None) is not False:
+            return arguments
+        try:
+            defaults = {n: p.default for n, p in inspect.signature(tool.fn).parameters.items()}
+        except (TypeError, ValueError):
+            return arguments
+        return {
+            key: value
+            for key, value in arguments.items()
+            if not (isinstance(value, str) and not value.strip() and key in defaults and defaults[key] is None)
+        }
 
     def _unknown_arguments(self, name: str, arguments: dict[str, Any]) -> set[str]:
         tool = self._tool_manager.get_tool(name)

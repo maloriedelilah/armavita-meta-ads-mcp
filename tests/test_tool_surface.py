@@ -419,6 +419,7 @@ def test_v1_signature_snapshot():
                    'is_dynamic_creative',
                    'start_time',
                    'end_time',
+                   'clear_end_time',
                    'placement_soft_opt_out',
                    'attribution_spec',
                    'promoted_object',

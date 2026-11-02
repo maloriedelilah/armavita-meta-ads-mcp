@@ -638,6 +638,7 @@ async def update_ad_set(
     is_dynamic_creative: Optional[bool] = None,
     start_time: Optional[str] = None,
     end_time: Optional[str] = None,
+    clear_end_time: Optional[bool] = None,
     placement_soft_opt_out: Optional[Dict[str, List[str]]] = None,
     attribution_spec: Optional[List[Dict[str, Any]]] = None,
     promoted_object: Optional[Dict[str, Any]] = None,
@@ -667,13 +668,17 @@ async def update_ad_set(
 
     `value_rule_set_id`:
     - a value rule set ID (from `list_value_rule_sets`) attaches that set;
-    - an empty string "" detaches the ad set's current value rule set;
-    - leave it out (or pass "keep") to keep whatever is attached now;
+    - exactly "" detaches the ad set's current value rule set;
+    - leave it out (or pass "keep", or only spaces) to keep whatever is attached now;
     - `null` is refused. Graph treats null as "detach", but many clients send
       null for every optional field they aren't using, and a budget edit must
       never silently strip a value rule. Pass "" to detach.
     The result says what happened to the value rule set. Read the ad set back
     afterwards: `read_ad_set` returns `value_rule_set_id`.
+
+    `end_time`: an ISO 8601 time sets the end. A blank `end_time` changes nothing. To remove
+    the end date (run ongoing), pass `clear_end_time=true` instead: it sends Graph's
+    end_time=0, which Meta allows only for ad sets with a daily budget.
 
     Money: `daily_budget`, `lifetime_budget` and `bid_amount` are whole numbers in the ad
     account's minor currency units (cents for USD, EUR, GBP, CAD, AUD, so 1000 = 10.00; whole
@@ -799,8 +804,12 @@ async def update_ad_set(
         )
     if start_time:
         payload["start_time"] = start_time
-    if end_time:
-        payload["end_time"] = end_time
+    if clear_end_time and end_time and str(end_time).strip():
+        return _json({"error": "Pass end_time or clear_end_time=true, not both. Nothing was changed."})
+    if clear_end_time:
+        payload["end_time"] = "0"  # Graph: 0 = ongoing, no end date (daily budgets only)
+    elif end_time and str(end_time).strip():
+        payload["end_time"] = str(end_time).strip()
     if placement_soft_opt_out is not None and placement_normalized is not None:
         payload["placement_soft_opt_out"] = _encode_placement_soft_opt_out(placement_normalized)
     if attribution_spec is not None:
@@ -813,9 +822,12 @@ async def update_ad_set(
         payload["dsa_beneficiary"] = dsa_beneficiary
     if dsa_payor is not None:
         payload["dsa_payor"] = dsa_payor
-    if str(value_rule_set_id).strip() != _KEEP_VALUE_RULE_SET:
-        # An ID attaches; an empty string detaches (verified against the live API).
-        payload["value_rule_set_id"] = str(value_rule_set_id).strip()
+    rule_set = str(value_rule_set_id)
+    if rule_set == "":
+        payload["value_rule_set_id"] = ""  # exactly "" detaches (verified against the live API)
+    elif rule_set.strip() and rule_set.strip() != _KEEP_VALUE_RULE_SET:
+        payload["value_rule_set_id"] = rule_set.strip()
+    # Whitespace-only is "keep" (ADS-61): a client padding unused fields must never detach.
 
     if not payload:
         # If the only thing the caller passed was a dropped create-only field
