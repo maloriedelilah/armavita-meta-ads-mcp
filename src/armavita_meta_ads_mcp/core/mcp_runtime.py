@@ -13,11 +13,12 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 
 from . import http_guard, http_mode, log_redaction
+from .tool_failures import FailuresAreErrors
 from .auth_state import login as login_auth
 from .media_helpers import log_startup_config, logger
 
 
-class _ArmavitaFastMCP(FastMCP):
+class _ArmavitaFastMCP(FailuresAreErrors):
     """FastMCP with two guards on calls that come from the client.
 
     Unknown arguments are refused in every mode: the SDK would otherwise ignore them
