@@ -162,7 +162,12 @@ def _call_through_mcp(arguments):
     from armavita_meta_ads_mcp.core.mcp_runtime import _import_tool_modules, mcp_server
 
     _import_tool_modules()
-    return asyncio.run(mcp_server.call_tool("update_ad_set", arguments))
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    try:
+        return asyncio.run(mcp_server.call_tool("update_ad_set", arguments))
+    except ToolError as refused:  # ADS-59: a refusal is an isError result, its text the tool's JSON
+        return str(refused)
 
 
 def test_update_ad_set_over_mcp_null_refused_omitted_keeps_id_attaches():

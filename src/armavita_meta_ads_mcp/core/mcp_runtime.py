@@ -4,6 +4,7 @@
 """FastMCP runtime assembly and CLI entrypoint (stdio by default, streamable HTTP optional)."""
 
 import argparse
+import json
 import logging
 import os
 import sys
@@ -42,7 +43,13 @@ class _ArmavitaFastMCP(FastMCP):
                 f"{name} doesn't take {', '.join(sorted(unknown))}. Nothing was done. "
                 "Check the tool's parameters and call it again without them."
             )
-        return await super().call_tool(name, arguments)
+        result = await super().call_tool(name, arguments)
+        failure = _failure_text(result)
+        if failure is not None:
+            # A failed call must look failed to the client (isError), not like data with
+            # an error inside (ADS-59). The text is the tool's own JSON, unchanged.
+            raise ToolError(failure)
+        return result
 
     def _unknown_arguments(self, name: str, arguments: dict[str, Any]) -> set[str]:
         tool = self._tool_manager.get_tool(name)
@@ -50,6 +57,24 @@ class _ArmavitaFastMCP(FastMCP):
             return set()  # the SDK reports an unknown tool itself
         properties = (tool.parameters or {}).get("properties") or {}
         return {key for key in arguments if key not in properties}
+
+
+def _failure_text(result: Any) -> Optional[str]:
+    """The tool's reply text if it reports a failure: a top-level `error`, or `success: false`."""
+    content = result[0] if isinstance(result, tuple) and result else result
+    if not isinstance(content, (list, tuple)):
+        return None
+    for block in content:
+        text = getattr(block, "text", None)
+        if not isinstance(text, str):
+            continue
+        try:
+            parsed = json.loads(text)
+        except ValueError:
+            continue
+        if isinstance(parsed, dict) and (parsed.get("error") or parsed.get("success") is False):
+            return text
+    return None
 
 
 mcp_server = _ArmavitaFastMCP("meta-ads")
