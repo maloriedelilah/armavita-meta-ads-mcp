@@ -53,11 +53,44 @@ def first_problem(*problems: Optional[str]) -> Optional[str]:
     return next((p for p in problems if p), None)
 
 
-def increase_problems(current: Any, new: dict, confirmed: bool) -> Optional[str]:
-    """increase_problem for each of {"daily_budget": n, "lifetime_budget": m} against a Graph read."""
-    if not isinstance(current, dict):
-        return None
-    return first_problem(*(increase_problem(k, current.get(k), v, confirmed) for k, v in new.items()))
+_OTHER_KIND = {"daily_budget": "lifetime_budget", "lifetime_budget": "daily_budget"}
+
+
+def _budget_value(value: Any) -> int:
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def budget_change_problem(current: Any, new: dict) -> Optional[str]:
+    """The unconfirmed-raise guard (ADS-60, closed per Errata's Lows): `current` is the Graph read
+    of the object's daily_budget/lifetime_budget, `new` the budgets being sent. It refuses:
+    - a raise above MAX_UNCONFIRMED_INCREASE x the current budget of the same kind;
+    - a switch between daily and lifetime, which can't be compared like for like;
+    - anything at all when the current budget couldn't be read (the guard fails closed).
+    The caller skips this entirely when confirm_budget_increase is true."""
+    if not isinstance(current, dict) or "error" in current:
+        return (
+            "The current budget couldn't be read from Meta, so this budget change can't be checked against it. "
+            "Nothing was changed. Try again in a moment, or, if you're sure of the amount, call again with "
+            "confirm_budget_increase=true."
+        )
+    for name, new_value in new.items():
+        if new_value is None:
+            continue
+        same, other = _budget_value(current.get(name)), _budget_value(current.get(_OTHER_KIND[name]))
+        if same > 0:
+            problem = increase_problem(name, same, new_value, False)
+            if problem:
+                return problem
+        elif other > 0:
+            return (
+                f"This switches the budget from {_OTHER_KIND[name]} ({other}) to {name} ({new_value}), which can't be "
+                f"compared like for like. Nothing was changed. Check the amount and the units ({name} is {UNITS}); "
+                "if it's intended, call again with confirm_budget_increase=true."
+            )
+    return None
 
 
 def increase_problem(name: str, current: Any, new: Optional[int], confirmed: bool) -> Optional[str]:

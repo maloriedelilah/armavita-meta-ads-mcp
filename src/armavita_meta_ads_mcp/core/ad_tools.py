@@ -1329,7 +1329,9 @@ async def create_ad_creative(
       * `facebook_page_id` — the Page the ad runs under. Give it. If it's left out it is
         filled in only when every place Pages are listed answered and they show exactly
         one Page; otherwise the call is refused and the reply lists what it found (use
-        list_account_pages to see them first).
+        list_account_pages to see them first). A token without business_management, such
+        as the hosted connector's, can't read the business Page lists, so there the Page is
+        never filled in: always pass facebook_page_id.
         The reply's `facebook_page_id_used` says which Page was used.
       * `instagram_user_id` — required for IG delivery (`instagram_actor_id`
         deprecated all-versions Sep 9, 2025).
