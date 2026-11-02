@@ -427,6 +427,7 @@ def test_v1_signature_snapshot():
                    'dsa_beneficiary',
                    'dsa_payor',
                    'value_rule_set_id',
+                   'detach_value_rule_set',
                    'confirm_budget_increase',
                    'meta_access_token'],
  'update_campaign': ['campaign_id',

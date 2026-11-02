@@ -48,13 +48,23 @@ def test_a_budget_edit_with_blank_strings_everywhere_sends_only_the_budget(blank
     assert _posts(api) == [{"daily_budget": "1500"}]
 
 
-def test_whitespace_value_rule_set_id_keeps_the_rule_set_and_exact_blank_still_detaches():
+@pytest.mark.parametrize("blank", BLANKS)
+def test_a_padded_budget_edit_never_detaches_the_value_rule_set(blank):
+    """The card's headline case (Errata on #28): the padded client sends value_rule_set_id "" too."""
+    padded = {k: blank for k in ("status", "end_time", "bid_strategy", "value_rule_set_id")}
     with patch.object(adset_tools, "make_api_request", new_callable=AsyncMock) as api:
         api.side_effect = lambda *a, **k: {"daily_budget": "1000"} if k.get("method") != "POST" else {"success": True}
-        _call("update_ad_set", {"ad_set_id": "as1", "daily_budget": 1500, "value_rule_set_id": "  "})
-        assert "value_rule_set_id" not in _posts(api)[-1]
-        _call("update_ad_set", {"ad_set_id": "as1", "value_rule_set_id": ""})
-        assert _posts(api)[-1] == {"value_rule_set_id": ""}
+        _call("update_ad_set", {"ad_set_id": "as1", "daily_budget": 1500, **padded})
+    assert _posts(api) == [{"daily_budget": "1500"}]
+
+
+def test_detaching_takes_the_explicit_flag():
+    with patch.object(adset_tools, "make_api_request", new_callable=AsyncMock) as api:
+        api.side_effect = lambda *a, **k: {"success": True}
+        out = _call("update_ad_set", {"ad_set_id": "as1", "detach_value_rule_set": True})
+        assert _posts(api) == [{"value_rule_set_id": ""}] and "detached" in _text(out)
+        both = _call("update_ad_set", {"ad_set_id": "as1", "detach_value_rule_set": True, "value_rule_set_id": "123"})
+    assert "not both" in _text(both) and len(_posts(api)) == 1
 
 
 @pytest.mark.parametrize("blank", BLANKS)
@@ -106,9 +116,27 @@ def test_ad_formats_still_sets_the_feed():
     assert _posts(api)[0]["asset_feed_spec"] == {"ad_formats": ["SINGLE_IMAGE"]}
 
 
+def test_a_write_tool_without_an_annotation_is_still_cleaned():
+    tool = mcp_server._tool_manager.get_tool("update_ad_set")
+    saved = tool.annotations
+    try:
+        tool.annotations = None
+        assert mcp_server._without_blank_optionals("update_ad_set", {"ad_set_id": "as1", "status": ""}) == {"ad_set_id": "as1"}
+    finally:
+        tool.annotations = saved
+
+
+@pytest.mark.parametrize("current", [{"lifetime_budget": "90000"}, {"id": "as1"}, {"error": {"code": 17}}])
+def test_clear_end_time_is_refused_without_a_daily_budget(current):
+    with patch.object(adset_tools, "make_api_request", new_callable=AsyncMock) as api:
+        api.side_effect = lambda *a, **k: current if k.get("method") != "POST" else {"success": True}
+        out = _call("update_ad_set", {"ad_set_id": "as1", "clear_end_time": True})
+    assert "needs an ad set with a daily budget" in _text(out) and _posts(api) == []
+
+
 def test_clear_end_time_sends_graphs_ongoing_value():
     with patch.object(adset_tools, "make_api_request", new_callable=AsyncMock) as api:
-        api.return_value = {"success": True}
+        api.side_effect = lambda *a, **k: {"daily_budget": "1000"} if k.get("method") != "POST" else {"success": True}
         _call("update_ad_set", {"ad_set_id": "as1", "clear_end_time": True})
         assert _posts(api) == [{"end_time": "0"}]
         refused = _call("update_ad_set", {"ad_set_id": "as1", "clear_end_time": True, "end_time": "2027-01-01T00:00:00Z"})

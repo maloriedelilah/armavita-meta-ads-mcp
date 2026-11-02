@@ -32,8 +32,8 @@ class _ArmavitaFastMCP(FastMCP):
     On tools that change things, a blank string in an optional argument means "not
     given" (ADS-61). Strict-schema clients fill every unused string field with "", and
     Graph takes "" as a real value: an enum or ID sent as "", or a field cleared during
-    an unrelated edit. Arguments whose blank value means something on purpose have a
-    default other than None (value_rule_set_id's "keep") and are left alone.
+    an unrelated edit. Arguments with a default other than None are left alone; clearing
+    something takes an explicit flag (detach_value_rule_set, clear_end_time).
     """
 
     async def call_tool(self, name: str, arguments: dict[str, Any]):
@@ -53,7 +53,9 @@ class _ArmavitaFastMCP(FastMCP):
 
     def _without_blank_optionals(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         tool = self._tool_manager.get_tool(name)
-        if tool is None or getattr(tool.annotations, "readOnlyHint", None) is not False:
+        # Cleaned unless the tool is marked read-only, so a write tool someone forgets to
+        # annotate is still covered (Errata's Low on ADS-61).
+        if tool is None or getattr(tool.annotations, "readOnlyHint", None) is True:
             return arguments
         try:
             defaults = {n: p.default for n, p in inspect.signature(tool.fn).parameters.items()}
