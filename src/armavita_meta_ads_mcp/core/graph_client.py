@@ -291,7 +291,8 @@ async def make_api_request(
                     continue
                 logger.error("Graph request failed (transport): %s", type(exc).__name__)
                 message = str(exc)
-                message = _sanitize_url(message)
+                if "access_token=" in message.lower():
+                    message = _sanitize_url(message)
                 return {"error": {"message": message}}
 
             except Exception as exc:  # noqa: BLE001
