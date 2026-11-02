@@ -20,8 +20,14 @@ _import_tool_modules()
 
 
 def _call(tool: str, arguments: dict):
-    """Call a tool the way an MCP client does, through FastMCP's argument handling."""
-    return asyncio.run(mcp_server.call_tool(tool, {"meta_access_token": "token", **arguments}))
+    """Call a tool the way an MCP client does, through FastMCP's argument handling. A refusal
+    may come back as a ToolError (an isError result, once ADS-59 lands); its text is the reply."""
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    try:
+        return asyncio.run(mcp_server.call_tool(tool, {"meta_access_token": "token", **arguments}))
+    except ToolError as refused:
+        return str(refused)
 
 
 def _posts(mock: AsyncMock) -> list:
