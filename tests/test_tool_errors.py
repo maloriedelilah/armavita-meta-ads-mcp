@@ -121,3 +121,53 @@ def test_a_post_that_never_connected_was_not_sent():
     run, calls = _graph(refused)
     result = asyncio.run(run("POST"))
     assert result["error"]["write_outcome"] == "not_sent" and "next_step" not in result["error"]
+
+
+# --- clone tools (Errata's blocker on #29) ---------------------------------------------------
+
+def _clone(handler):
+    """clone_campaign over a real MCP client session against a fake Graph."""
+    calls = []
+
+    def counted(request):
+        calls.append(request)
+        return handler(request)
+
+    def client_factory(*args, **kwargs):
+        kwargs.pop("transport", None)
+        return _RealAsyncClient(*args, transport=httpx.MockTransport(counted), **kwargs)
+
+    async def run():
+        async with create_connected_server_and_client_session(mcp_server._mcp_server) as client:
+            with patch.object(graph_client.httpx, "AsyncClient", side_effect=client_factory), patch.object(
+                graph_client.asyncio, "sleep", new_callable=AsyncMock
+            ):
+                return await client.call_tool("clone_campaign", {"campaign_id": "120000000000001", "meta_access_token": "t"})
+
+    result = asyncio.run(run())
+    posts = [c for c in calls if c.method == "POST"]
+    return result, posts
+
+
+def test_a_clone_post_500_with_code_4_is_not_told_to_retry():
+    result, posts = _clone(lambda r: httpx.Response(500, json={"error": {"code": 4, "message": "limit"}}))
+    text = result.content[0].text
+    assert result.isError is True and len(posts) == 1
+    assert "Retry with backoff" not in text and '"write_outcome": "unknown"' in text and "Read the object back" in text
+
+
+def test_a_clone_post_that_timed_out_says_it_may_have_landed():
+    def timeout(request):
+        if request.method == "POST":
+            raise httpx.ReadTimeout("timed out", request=request)
+        return httpx.Response(200, json={"id": "120000000000001", "objective": "OUTCOME_TRAFFIC"})
+
+    result, posts = _clone(timeout)
+    text = result.content[0].text
+    assert result.isError is True and len(posts) == 1
+    assert '"write_outcome": "unknown"' in text and "may have been applied" in text
+
+
+def test_a_clone_rate_limited_with_a_4xx_still_gets_the_retry_hint():
+    result, posts = _clone(lambda r: httpx.Response(400, json={"error": {"code": 4, "message": "limit"}}))
+    assert result.isError is True and "Retry with backoff" in result.content[0].text
