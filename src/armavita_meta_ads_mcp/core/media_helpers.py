@@ -4,6 +4,7 @@
 """Shared utility helpers used across MCP tools."""
 
 import logging
+import logging.handlers
 import os
 import pathlib
 import platform
@@ -37,8 +38,12 @@ def _resolve_log_file() -> pathlib.Path:
     return root / PACKAGE_NAME / "server.log"
 
 
-class _PrivateFileHandler(logging.FileHandler):
-    """A FileHandler whose file is owner-only (0600) from the moment it exists (ADS-45)."""
+class _PrivateFileHandler(logging.handlers.RotatingFileHandler):
+    """A rotating log file that is owner-only (0600) from the moment it exists (ADS-45).
+
+    Rotated at 5 MB with three old files kept (ADS-63): before, server.log grew without
+    limit. Rollover reopens through _open, so new files are 0600 too.
+    """
 
     def _open(self):
         os.makedirs(os.path.dirname(self.baseFilename), mode=0o700, exist_ok=True)
@@ -48,6 +53,24 @@ class _PrivateFileHandler(logging.FileHandler):
         except OSError:
             pass
         return os.fdopen(fd, self.mode, encoding=self.encoding, errors=self.errors)
+
+
+def loggable_url(url: object) -> str:
+    """A URL as it may appear in a log: scheme, host and path only (ADS-63).
+
+    Image URLs can carry signed parameters or user:pass@ credentials; neither is needed to
+    tell which download failed.
+    """
+    try:
+        from urllib.parse import urlsplit
+
+        parts = urlsplit(str(url))
+        host = parts.hostname or ""
+        if parts.port:
+            host = f"{host}:{parts.port}"
+        return f"{parts.scheme}://{host}{parts.path}" if parts.scheme else "(not a URL)"
+    except ValueError:
+        return "(unparseable URL)"
 
 
 def _create_logger() -> logging.Logger:
@@ -61,7 +84,9 @@ def _create_logger() -> logging.Logger:
     logger.setLevel(logging.INFO)
     # delay=True: the file isn't created until something is logged to it. In HTTP mode the
     # handler is swapped for stderr before anything is, so no server.log appears at all.
-    handler = _PrivateFileHandler(_resolve_log_file(), encoding="utf-8", delay=True)
+    handler = _PrivateFileHandler(
+        _resolve_log_file(), maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8", delay=True
+    )
     formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
     handler.setFormatter(formatter)
     install_on_handlers([handler])  # ADS-45: no token reaches server.log
@@ -194,7 +219,7 @@ async def download_image(url: str) -> Optional[bytes]:
         # ADS-62: streamed, capped at Meta's image size, with one overall deadline.
         return await fetch_capped(url, headers, follow_redirects=_follow_redirects())
     except Exception as exc:  # noqa: BLE001
-        logger.warning("image_download_failed url=%s error=%s", url, type(exc).__name__)
+        logger.warning("image_download_failed url=%s error=%s", loggable_url(url), type(exc).__name__)
         return None
 
 
@@ -231,14 +256,17 @@ async def try_multiple_download_methods(url: str) -> Optional[bytes]:
     for profile in header_profiles:
         remaining = give_up_at - time.monotonic()
         if remaining <= 0:
-            logger.warning("image_download_failed url=%s error=deadline", url)
+            logger.warning("image_download_failed url=%s error=deadline", loggable_url(url))
             break
         try:
             return await fetch_capped(url, profile, follow_redirects=_follow_redirects(), deadline=remaining)
         except ImageRejected:
-            logger.warning("image_download_refused url=%s reason=too_large", url)
+            logger.warning("image_download_refused url=%s reason=too_large", loggable_url(url))
             break
         except Exception as exc:  # noqa: BLE001
-            logger.debug("image_download_attempt_failed url=%s ua=%s error=%s", url, profile.get("User-Agent"), type(exc).__name__)
+            logger.debug(
+                "image_download_attempt_failed url=%s ua=%s error=%s",
+                loggable_url(url), profile.get("User-Agent"), type(exc).__name__,
+            )
 
     return None
