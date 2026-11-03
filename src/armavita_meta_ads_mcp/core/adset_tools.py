@@ -488,6 +488,10 @@ async def create_ad_set(
     is OFF (`{"advantage_audience": 0}`). The reply's `targeting_sent` is the
     exact spec sent to Meta.
 
+    With Advantage+ audience on (`targeting_automation.advantage_audience: 1`), Meta refuses an
+    `age_min` above 25 (give an older age as a suggestion instead), and it adds "frequently_in"
+    to `geo_locations.location_types` when the ad set is saved.
+
     `targeting` accepts the standard Meta targeting spec, including
     `excluded_custom_audiences` for audience exclusions. The legacy `exclusions`
     field (detailed-targeting exclusions) is deprecated v22.0+ and stripped
@@ -680,6 +684,15 @@ async def update_ad_set(
       there (set a sub-key to null to remove it, e.g. `{"countries": null}`).
       `targeting_automation` can be changed in a patch but never removed.
     The reply's `targeting_sent` is the exact spec sent to Meta.
+
+    Meta's rules worth knowing (seen live, Nov 2026):
+    - With Advantage+ audience on (`targeting_automation.advantage_audience: 1`), `age_min`
+      can't be above 25; Meta refuses it. Give an older age as a suggestion instead, or turn
+      Advantage+ audience off.
+    - One change per ad set every 30 seconds: put every change to an ad set in one call. A
+      second call within 30 s is refused (nothing changes) and says when to try again.
+    - Meta adds "frequently_in" to `geo_locations.location_types` whenever targeting is saved,
+      even if it wasn't sent. Don't treat it as drift when comparing a read-back.
 
     `value_rule_set_id`:
     - a value rule set ID (from `list_value_rule_sets`) attaches that set;

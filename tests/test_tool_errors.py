@@ -171,3 +171,18 @@ def test_a_clone_post_that_timed_out_says_it_may_have_landed():
 def test_a_clone_rate_limited_with_a_4xx_still_gets_the_retry_hint():
     result, posts = _clone(lambda r: httpx.Response(400, json={"error": {"code": 4, "message": "limit"}}))
     assert result.isError is True and "Retry with backoff" in result.content[0].text
+
+
+def test_metas_per_object_write_limit_isnt_retried_and_says_when_to_try():
+    """ADS-100: 613/4841018 ("1 calls per 30 seconds") failed again inside our backoff live."""
+    body = {"error": {"code": 613, "error_subcode": 4841018, "message": "(#613) Calls to this API have exceeded the concurrent request rate limit of 1 calls per 30 seconds."}}
+    run, calls = _graph(lambda r: httpx.Response(400, json=body))
+    result = asyncio.run(run("POST"))
+    assert len(calls) == 1
+    assert result["error"]["write_outcome"] == "not_applied" and "30 seconds" in result["error"]["next_step"]
+
+
+def test_other_613s_are_still_retried():
+    replies = iter([httpx.Response(400, json={"error": {"code": 613}}), httpx.Response(200, json={"id": "c1"})])
+    run, calls = _graph(lambda r: next(replies))
+    assert asyncio.run(run("POST")) == {"id": "c1"} and len(calls) == 2
