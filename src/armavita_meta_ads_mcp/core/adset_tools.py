@@ -179,8 +179,9 @@ def _apply_targeting_patch(current: Dict[str, Any], patch: Dict[str, Any]) -> tu
     - geo_locations is merged one level down: {"cities": [...]} adds or changes cities and keeps
       countries and location_types; a sub-key set to null is removed (ADS-56 review).
     - targeting_automation can't be removed or nulled; give its new value instead.
-    - With Advantage+ audience off, setting age_min/age_max drops a read-back age_range (and
-      the reverse), so the two can't contradict each other. With it on, they mean different
+    - With Advantage+ audience off (including a patch that turns it off), a read-back
+      age_range is dropped unless the patch sets age_range, and setting age_range drops
+      age_min/age_max, so the two can't contradict each other. With it on, they mean different
       things (age_min is the floor, 18-25; age_range is the suggestion), so both are kept.
     """
     if "targeting_automation" in patch and not isinstance(patch["targeting_automation"], dict):
@@ -206,7 +207,9 @@ def _apply_targeting_patch(current: Dict[str, Any], patch: Dict[str, Any]) -> tu
             merged[key] = value
     if (merged.get("targeting_automation") or {}).get("advantage_audience") == 1:
         return merged, None
-    if ("age_min" in patch or "age_max" in patch) and "age_range" not in patch:
+    if "age_range" not in patch and ("age_min" in merged or "age_max" in merged):
+        # With Advantage+ off, age_range and age_min/age_max are alternatives. This also covers a
+        # patch that turns Advantage+ off: the read-back suggestion goes (Errata's Low on ADS-105).
         merged.pop("age_range", None)
     if "age_range" in patch:
         for k in ("age_min", "age_max"):

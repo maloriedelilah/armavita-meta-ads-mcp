@@ -236,6 +236,14 @@ async def test_with_advantage_audience_on_the_floor_and_the_suggestion_are_both_
 
 
 @pytest.mark.asyncio
+async def test_turning_advantage_audience_off_drops_the_suggestion():
+    """Errata's Low on ADS-105: off with both age_min and age_range left is the ADS-56 contradiction."""
+    current = dict(CURRENT, age_min=21, age_max=65, age_range=[35, 65], targeting_automation={"advantage_audience": 1})
+    out, sent = await _patch(current, {"targeting_automation": {"advantage_audience": 0}})
+    assert sent["age_min"] == 21 and "age_range" not in sent
+
+
+@pytest.mark.asyncio
 async def test_legacy_exclusions_mean_a_patch_is_refused_not_silently_dropped():
     current = dict(CURRENT, exclusions={"interests": [{"id": "1"}]})
     out, sent = await _patch(current, {"age_min": 25})
