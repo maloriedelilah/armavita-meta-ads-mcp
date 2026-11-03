@@ -33,7 +33,7 @@ async def test_a_good_time_increment_is_sent(given, sent):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("given", [0, 91, -1, True, 1.5, "daily", "1d", [1], {"x": 1}])
+@pytest.mark.parametrize("given", [0, 91, -1, True, 1.5, "daily", "1d", [1], {"x": 1}, "\u00b2", "9" * 5000, "١"])
 async def test_a_bad_time_increment_is_refused_before_any_call(given):
     out, api = await _call(time_increment=given)
     assert out["error"] == "invalid_time_increment" and "1 to 90" in out["message"]
@@ -50,3 +50,22 @@ async def test_no_time_increment_sends_none(given):
 def test_the_tool_says_how_to_get_daily_rows():
     doc = list_insights.__doc__ or ""
     assert "time_increment" in doc and "one row per day" in doc and "next" in doc
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("given", [0, -1, 501, 10**9, True])
+async def test_page_size_is_capped(given):
+    out, api = await _call(page_size=given)
+    assert out["error"] == "invalid_page_size"
+    api.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_good_page_size_is_sent_as_limit():
+    out, api = await _call(page_size=500)
+    assert api.call_args.args[2]["page_size"] == 500
+
+
+def test_the_tool_says_to_resend_the_same_arguments_with_a_cursor():
+    doc = list_insights.__doc__ or ""
+    assert "same arguments" in doc and '"maximum"' in doc
