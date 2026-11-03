@@ -186,7 +186,7 @@ Beyond the core auth variables above, the server reads four optional knobs:
 
 ### Value rules
 - `list_value_rule_sets`, `read_value_rule_set` (with each rule's name, `adjust_sign`, `adjust_value` and status; Meta does not return the condition a rule matches, such as age or gender)
-- Attach with `value_rule_set_id` on `create_ad_set` / `update_ad_set` (empty string on update detaches); `read_ad_set` and `list_ad_sets` return it
+- Attach with `value_rule_set_id` on `create_ad_set` / `update_ad_set`; detach on update with `value_rule_set_id: ""` plus `send_empty: ["value_rule_set_id"]` (an empty value alone changes nothing); `read_ad_set` and `list_ad_sets` return it
 
 ### Custom conversions
 - `list_custom_conversions`, `read_custom_conversion`, `create_custom_conversion`, `update_custom_conversion`

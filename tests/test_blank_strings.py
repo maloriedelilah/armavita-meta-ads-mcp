@@ -64,13 +64,14 @@ def test_a_padded_budget_edit_never_detaches_the_value_rule_set(blank):
     assert _posts(api) == [{"daily_budget": "1500"}]
 
 
-def test_detaching_takes_the_explicit_flag():
+def test_detaching_takes_send_empty():
+    """ADS-96: one way to clear anything. value_rule_set_id "" detaches only when named in send_empty."""
     with patch.object(adset_tools, "make_api_request", new_callable=AsyncMock) as api:
         api.side_effect = lambda *a, **k: {"success": True}
-        out = _call("update_ad_set", {"ad_set_id": "as1", "detach_value_rule_set": True})
-        assert _posts(api) == [{"value_rule_set_id": ""}] and "detached" in _text(out)
-        both = _call("update_ad_set", {"ad_set_id": "as1", "detach_value_rule_set": True, "value_rule_set_id": "123"})
-    assert "not both" in _text(both) and len(_posts(api)) == 1
+        out = _call("update_ad_set", {"ad_set_id": "as1", "value_rule_set_id": "", "send_empty": ["value_rule_set_id"]})
+        assert _posts(api) == [{"value_rule_set_id": ""}] and "detached" in _text(out) and "sent_empty" in _text(out)
+        with_id = _call("update_ad_set", {"ad_set_id": "as1", "value_rule_set_id": "123", "send_empty": ["value_rule_set_id"]})
+    assert "empty (" in _text(with_id) and len(_posts(api)) == 1
 
 
 @pytest.mark.parametrize("blank", BLANKS)
@@ -136,14 +137,14 @@ def test_a_write_tool_without_an_annotation_is_still_cleaned():
 def test_clear_end_time_is_refused_without_a_daily_budget(current):
     with patch.object(adset_tools, "make_api_request", new_callable=AsyncMock) as api:
         api.side_effect = lambda *a, **k: current if k.get("method") != "POST" else {"success": True}
-        out = _call("update_ad_set", {"ad_set_id": "as1", "clear_end_time": True})
-    assert "needs an ad set with a daily budget" in _text(out) and _posts(api) == []
+        out = _call("update_ad_set", {"ad_set_id": "as1", "end_time": "", "send_empty": ["end_time"]})
+    assert "Clearing end_time needs a daily budget" in _text(out) and _posts(api) == []
 
 
 def test_clear_end_time_sends_graphs_ongoing_value():
     with patch.object(adset_tools, "make_api_request", new_callable=AsyncMock) as api:
         api.side_effect = lambda *a, **k: {"daily_budget": "1000"} if k.get("method") != "POST" else {"success": True}
-        _call("update_ad_set", {"ad_set_id": "as1", "clear_end_time": True})
+        _call("update_ad_set", {"ad_set_id": "as1", "end_time": "", "send_empty": ["end_time"]})
         assert _posts(api) == [{"end_time": "0"}]
-        refused = _call("update_ad_set", {"ad_set_id": "as1", "clear_end_time": True, "end_time": "2027-01-01T00:00:00Z"})
-    assert "not both" in _text(refused) and len(_posts(api)) == 1
+        refused = _call("update_ad_set", {"ad_set_id": "as1", "end_time": "2027-01-01T00:00:00Z", "send_empty": ["end_time"]})
+    assert "empty (" in _text(refused) and len(_posts(api)) == 1

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Changed
+
+- **Empty values mean "not given" (ADS-61, ADS-96).** Some clients fill every unused field with `""`, `[]` or `{}`, and Graph took those as real values: a budget edit could also clear frequency caps, the attribution window, bid constraints or the value rule set. Now an empty value in an optional argument is dropped, on every tool.
+- **`send_empty` is the one way to clear a field.** Send the field empty and name it, e.g. `frequency_control_specs: [], send_empty: ["frequency_control_specs"]`. Each update tool lists what it can clear: `update_ad_set` (attribution_spec, bid_constraints, end_time, frequency_control_specs, value_rule_set_id), `update_campaign` (bid_constraints, special_ad_categories), `update_ad` (tracking_specs), `update_custom_audience` and `update_custom_conversion` (description). A name the tool can't clear, or one sent with a non-empty value, is refused before anything reaches Meta; the reply's `sent_empty` lists what was cleared.
+- **Detaching a value rule set** is now `value_rule_set_id: ""` with `send_empty: ["value_rule_set_id"]`. An empty string on its own keeps the current set (it used to detach it).
+- **Removing an ad set's end date** is `end_time: ""` with `send_empty: ["end_time"]` (sent to Graph as `end_time=0`). It needs a daily budget on the ad set or its campaign.
+
 ### Removed
 
 - `delete_custom_audience` and `delete_custom_conversion` (ADS-54). This server never deletes anything; the account owner deletes in Ads Manager.
@@ -19,7 +26,7 @@
   - New guide, [docs/http-mode.md](docs/http-mode.md): the start command, Cloudflare Tunnel versus Claude MCP tunnels, connector headers and rotation.
 - Streamable HTTP transport (`--transport streamable-http`, with `--host`, `--port`, `--path` and repeatable `--allowed-host` for a tunnel's public name). In HTTP mode the Meta token comes only from each request's `Authorization: Bearer` header. It is never cached, and there is no fallback to `META_ACCESS_TOKEN`, the `--login` cache or app credentials. A `meta_access_token` tool argument is refused on every tool, and uvicorn's access log is off. stdio stays the default and is unchanged.
 - `list_value_rule_sets` and `read_value_rule_set`: read an ad account's value rule sets (`act_<id>/value_rule_set`) and the rules inside a set (each rule's name, adjustment and status; Meta does not return the condition a rule matches).
-- `create_ad_set` and `update_ad_set` accept `value_rule_set_id` to attach a value rule set; on `update_ad_set` an empty string detaches it. `read_ad_set` and `list_ad_sets` now return `value_rule_set_id`.
+- `create_ad_set` and `update_ad_set` accept `value_rule_set_id` to attach a value rule set; on `update_ad_set` detaching now takes `send_empty` (see Changed). `read_ad_set` and `list_ad_sets` now return `value_rule_set_id`.
 - `create_ad_creative` accepts `display_link`, the display URL shown under single image and video ads (sent as `link_data.caption` for images and `call_to_action.value.link_caption` for videos).
 
 ### Fixed
@@ -46,7 +53,7 @@
   - `update_*` treat `status=""` as "unchanged".
   - The `value_rule_set_id: null` refusal now offers `"keep"`.
   - The OAuth callback logs only exception types.
-- `update_ad_set`: an explicit `null` `value_rule_set_id` is now refused with a message (`""` detaches; leaving it out keeps). It used to be read as "not given" and silently changed nothing, while in Graph `null` detaches. Refusing it, instead of detaching, protects clients that send `null` for every unused optional field: a budget edit can never strip a value rule. The reply now says when a value rule set was attached or detached.
+- `update_ad_set`: an explicit `null` `value_rule_set_id` is now refused with a message (detaching now takes `send_empty`; leaving it out keeps). It used to be read as "not given" and silently changed nothing, while in Graph `null` detaches. Refusing it, instead of detaching, protects clients that send `null` for every unused optional field: a budget edit can never strip a value rule. The reply now says when a value rule set was attached or detached.
 - **IDs can no longer reshape Graph requests (ADS-53, security).** Every tool's ID arguments must be plain IDs. `*_id` and `*_ids` allow only letters, digits and `_`; `ad_account_id` must be `act_<digits>` or digits, and `meta_user_id` must be `me` or digits. `make_api_request` also refuses any Graph path that isn't plain segments. Before, `update_ad(ad_id="321?status=ACTIVE", bid_amount=50)` activated the ad, and `custom_audience_id="77#"` on a remove-users call deleted the whole audience. Any argument mentioning `access_token` (for example `fields="name,access_token"`) is refused, and any response field whose name contains `access_token` (such as Page tokens) is redacted.
 - **Status safety (ADS-54).** Following the house rules: everything is built paused, the user reviews before activating, and nothing is deleted.
   - `create_campaign`, `create_ad_set`, `create_ad` and `clone_campaign`/`clone_ad_set`/`clone_ad` always create PAUSED. A missing, null or `""` status means PAUSED (before, `status=""` replaced the default), and ACTIVE or any other value is refused with a message to activate later through the update tool.

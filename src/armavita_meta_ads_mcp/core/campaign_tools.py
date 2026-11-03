@@ -7,7 +7,7 @@
 import json
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from . import money, status_policy
+from . import empties, money, status_policy
 from .graph_client import make_api_request, meta_api_tool
 from .meta_v25_guards import (
     detect_deprecated_advantage_plus_block,
@@ -362,8 +362,13 @@ async def update_campaign(
     migrate_to_advantage_plus: Optional[bool] = None,
     bid_constraints: Optional[Dict[str, Any]] = None,
     confirm_budget_increase: Optional[bool] = None,
+    send_empty: Optional[List[str]] = None,
 ) -> str:
     """Update campaign settings for an existing campaign.
+
+    `send_empty`: to clear a field, send it empty AND list its name here (an empty value that
+    isn't listed changes nothing). This tool can clear: bid_constraints, special_ad_categories
+    (an empty list means no special category).
 
     Money: `daily_budget`, `lifetime_budget` and `spend_cap` are whole numbers in the ad
     account's minor currency units (cents for USD, EUR, GBP, CAD, AUD, so 1000 = 10.00; whole
@@ -386,6 +391,12 @@ async def update_campaign(
     bid_error = _validate_bid_strategy(bid_strategy)
     if bid_error:
         return _json(bid_error)
+
+    empty_error = empties.problem(send_empty, ("bid_constraints", "special_ad_categories"), {
+        "bid_constraints": bid_constraints, "special_ad_categories": special_ad_categories,
+    })
+    if empty_error:
+        return _json({"error": empty_error})
 
     money_error = _budget_arguments_problem(daily_budget, lifetime_budget, spend_cap, bool(use_ad_set_level_budgets))
     if money_error:
@@ -486,6 +497,8 @@ async def update_campaign(
             result["note"] = "Campaign updated to use ad set level budgets."
         if increase_check:
             result["budget_increase_check"] = increase_check
+        if send_empty and not result.get("error"):
+            result["sent_empty"] = sorted(empties.requested(send_empty))
         if ignored_warnings:
             existing = result.get("warnings")
             result["warnings"] = (existing + ignored_warnings) if isinstance(existing, list) else ignored_warnings

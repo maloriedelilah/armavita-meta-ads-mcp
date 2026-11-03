@@ -19,6 +19,7 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 
+from . import empties
 from .graph_client import make_api_request, meta_api_tool
 from .mcp_runtime import mcp_server
 from mcp.types import ToolAnnotations
@@ -191,10 +192,18 @@ async def update_custom_audience(
     retention_days: Optional[int] = None,
     rule: Optional[Dict[str, Any]] = None,
     rule_aggregation: Optional[Dict[str, Any]] = None,
+    send_empty: Optional[List[str]] = None,
 ) -> str:
-    """Update mutable fields on a custom audience."""
+    """Update mutable fields on a custom audience.
+
+    `send_empty`: to clear a field, send it empty AND list its name here (an empty value that
+    isn't listed changes nothing). This tool can clear: description.
+    """
     if not str(custom_audience_id or "").strip():
         return _json({"error": "custom_audience_id is required"})
+    empty_error = empties.problem(send_empty, ("description",), {"description": description})
+    if empty_error:
+        return _json({"error": empty_error})
 
     payload: Dict[str, Any] = {}
     if name is not None:
@@ -217,6 +226,8 @@ async def update_custom_audience(
         payload,
         method="POST",
     )
+    if send_empty and isinstance(result, dict) and not result.get("error"):
+        result["sent_empty"] = sorted(empties.requested(send_empty))
     return _json(result)
 
 

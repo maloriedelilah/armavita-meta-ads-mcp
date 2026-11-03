@@ -30,11 +30,11 @@ async def test_update_ad_set_attaches_value_rule_set():
 
 
 @pytest.mark.asyncio
-async def test_update_ad_set_detach_flag_detaches():
+async def test_update_ad_set_send_empty_detaches():
     with patch(_PATCH_TARGET, new_callable=AsyncMock) as mock_api:
         mock_api.return_value = {"success": True}
 
-        raw = await update_ad_set(ad_set_id="adset_1", meta_access_token="token", detach_value_rule_set=True)
+        raw = await update_ad_set(ad_set_id="adset_1", meta_access_token="token", value_rule_set_id="", send_empty=["value_rule_set_id"])
 
     assert json.loads(raw)["success"] is True
     assert mock_api.call_args.args[2] == {"value_rule_set_id": ""}
@@ -126,7 +126,7 @@ async def test_update_ad_set_null_is_refused_and_nothing_is_sent():
     if "data" in reply:
         reply = json.loads(reply["data"])
     error = reply["error"]
-    assert "value_rule_set_id is null" in error and "detach_value_rule_set=true" in error
+    assert "value_rule_set_id is null" in error and "send_empty" in error
 
 
 @pytest.mark.asyncio
@@ -135,7 +135,7 @@ async def test_update_ad_set_reports_attach_and_detach_in_result():
         # A fresh reply per call: the tool adds keys to the dict Graph returns.
         mock_api.side_effect = lambda *args, **kwargs: {"success": True}
         attached = json.loads(await update_ad_set(ad_set_id="adset_1", meta_access_token="token", value_rule_set_id="123"))
-        detached = json.loads(await update_ad_set(ad_set_id="adset_1", meta_access_token="token", detach_value_rule_set=True))
+        detached = json.loads(await update_ad_set(ad_set_id="adset_1", meta_access_token="token", value_rule_set_id="", send_empty=["value_rule_set_id"]))
         budget_only = json.loads(await update_ad_set(ad_set_id="adset_1", meta_access_token="token", daily_budget=1000))
 
     assert attached["value_rule_set"] == {"attached": "123"}
