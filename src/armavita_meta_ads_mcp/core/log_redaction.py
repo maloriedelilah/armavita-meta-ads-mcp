@@ -25,6 +25,8 @@ _PATTERNS = (
     (re.compile(r"(?i)(bearer\s+)[A-Za-z0-9\-._~+/]+=*"), r"\1" + REDACTED),
     # access_token=... in URLs and form bodies
     (re.compile(r"(?i)(access_token=)[^&\s'\"<>]+"), r"\1" + REDACTED),
+    # ...and URL-encoded, as access_token%3D... inside another URL's parameter (ADS-63)
+    (re.compile(r"(?i)(access_token%3D)[^&\s'\"<>%]+"), r"\1" + REDACTED),
     # "access_token": "..." / 'access_token': '...' in reprs and JSON
     (re.compile(r"""(?i)(['"]?(?:meta_)?access_token['"]?\s*[:=]\s*['"]?)[^'"\s,}&]+"""), r"\1" + REDACTED),
     # The HTTP-mode shared secret (ADS-46), in header dicts, ASGI header tuples and "name: value" lines
