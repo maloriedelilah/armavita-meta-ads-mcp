@@ -67,6 +67,26 @@ def _append_warnings(payload: Dict[str, Any], warnings: List[Dict[str, Any]]) ->
     return payload
 
 
+_INCREMENT_WORDS = {"monthly", "all_days"}
+
+
+def _time_increment(value: Any) -> tuple[Optional[str], Optional[str]]:
+    """Graph's time_increment: a whole number of days 1-90, "monthly" or "all_days" (ADS-106)."""
+    why = 'time_increment must be a whole number of days from 1 to 90, "monthly" or "all_days".'
+    if isinstance(value, bool):
+        return None, why
+    if isinstance(value, str):
+        word = value.strip().lower()
+        if word in _INCREMENT_WORDS:
+            return word, None
+        if not word.isdigit():
+            return None, why
+        value = int(word)
+    if isinstance(value, int) and 1 <= value <= 90:
+        return str(value), None
+    return None, why
+
+
 @mcp_server.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
 @meta_api_tool
 async def list_insights(
@@ -83,11 +103,19 @@ async def list_insights(
     action_attribution_windows: Optional[List[str]] = None,
     compact: bool = False,
     fields: Optional[str] = None,
+    time_increment: Optional[Union[int, str]] = None,
 ) -> str:
     """Fetch insights for an account, campaign, ad set, or ad.
 
     Pass `fields` to request custom metrics (including names from
     `list_ad_custom_derived_metrics`). Defaults to a standard performance bundle.
+
+    `time_increment` splits the date range into rows: 1 gives one row per day (each row has
+    date_start and date_stop), 7 one per week, any whole number of days from 1 to 90;
+    "monthly" one per calendar month; "all_days" (Graph's default) one row for the whole
+    range. Daily numbers for a week of ad sets are then one call: date_range "last_7d",
+    level "adset", time_increment 1. Rows multiply (days x objects), so follow the paging
+    cursor until there is no `next`.
     """
     if not str(object_id or "").strip():
         return json.dumps({"error": "An object_id (account, campaign, ad set, or ad) is required"}, indent=2)
@@ -122,6 +150,12 @@ async def list_insights(
     )
     params.update(breakdown_params)
     normalization_warnings.extend(breakdown_warnings)
+
+    if time_increment is not None and time_increment != "":
+        increment, increment_error = _time_increment(time_increment)
+        if increment_error:
+            return json.dumps({"error": "invalid_time_increment", "message": increment_error, "provided": time_increment}, indent=2)
+        params["time_increment"] = increment
 
     if page_cursor:
         params["page_cursor"] = page_cursor
