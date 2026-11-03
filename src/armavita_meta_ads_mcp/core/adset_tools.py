@@ -180,7 +180,9 @@ def _apply_targeting_patch(current: Dict[str, Any], patch: Dict[str, Any]) -> tu
       countries and location_types; a sub-key set to null is removed (ADS-56 review).
     - targeting_automation can't be removed or nulled; give its new value instead.
     - With Advantage+ audience off, setting age_min/age_max drops a read-back age_range (and
-      the reverse), so the two can't contradict each other. With it on, they mean different
+      the reverse), so the two can't contradict each other. A patch that turns Advantage+ off
+      on an ad set with both a floor and a suggested age_range must say which ages to keep;
+      otherwise it's refused (ADS-109). With it on, they mean different
       things (age_min is the floor, 18-25; age_range is the suggestion), so both are kept.
     """
     if "targeting_automation" in patch and not isinstance(patch["targeting_automation"], dict):
@@ -206,6 +208,17 @@ def _apply_targeting_patch(current: Dict[str, Any], patch: Dict[str, Any]) -> tu
             merged[key] = value
     if (merged.get("targeting_automation") or {}).get("advantage_audience") == 1:
         return merged, None
+    was_on = (current.get("targeting_automation") or {}).get("advantage_audience") == 1
+    sets_ages = any(k in patch for k in ("age_min", "age_max", "age_range"))
+    if was_on and not sets_ages and "age_range" in current and ("age_min" in current or "age_max" in current):
+        # Under Advantage+ the real target is often the age_range suggestion, with age_min only a
+        # floor. Off, the floor would become the audience, so never guess (Errata, ADS-109).
+        return None, (
+            "turning Advantage+ audience off: say which ages to keep. This ad set has a hard floor "
+            f"(age_min {current.get('age_min')}, age_max {current.get('age_max')}) and a suggested "
+            f"age_range {current.get('age_range')}; with Advantage+ off only one applies. Add age_min/"
+            "age_max or age_range to the same targeting_patch"
+        )
     if ("age_min" in patch or "age_max" in patch) and "age_range" not in patch:
         merged.pop("age_range", None)
     if "age_range" in patch:
