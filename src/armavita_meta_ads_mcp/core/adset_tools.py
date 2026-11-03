@@ -20,8 +20,9 @@ _BID_STRATEGY_MIN_ROAS = "LOWEST_COST_WITH_MIN_ROAS"
 
 # Default for update_ad_set's value_rule_set_id. It lets the tool tell an
 # omitted argument apart from an explicit JSON null: FastMCP turns both into
-# None when the default is None. Omitted keeps the current set; null is
-# refused (some clients send null for every unused optional field).
+# None when the default is None. Omitted, "keep" and "" keep the current set;
+# null is refused (some clients send null for every unused optional field).
+# Detaching takes detach_value_rule_set=true (ADS-61): clients pad with "" too.
 _KEEP_VALUE_RULE_SET = "keep"
 
 
@@ -638,6 +639,7 @@ async def update_ad_set(
     is_dynamic_creative: Optional[bool] = None,
     start_time: Optional[str] = None,
     end_time: Optional[str] = None,
+    clear_end_time: Optional[bool] = None,
     placement_soft_opt_out: Optional[Dict[str, List[str]]] = None,
     attribution_spec: Optional[List[Dict[str, Any]]] = None,
     promoted_object: Optional[Dict[str, Any]] = None,
@@ -645,6 +647,7 @@ async def update_ad_set(
     dsa_beneficiary: Optional[str] = None,
     dsa_payor: Optional[str] = None,
     value_rule_set_id: Optional[str] = _KEEP_VALUE_RULE_SET,
+    detach_value_rule_set: Optional[bool] = None,
     confirm_budget_increase: Optional[bool] = None,
     meta_access_token: Optional[str] = None,
 ) -> str:
@@ -667,13 +670,19 @@ async def update_ad_set(
 
     `value_rule_set_id`:
     - a value rule set ID (from `list_value_rule_sets`) attaches that set;
-    - an empty string "" detaches the ad set's current value rule set;
-    - leave it out (or pass "keep") to keep whatever is attached now;
+    - leave it out, or pass "keep" or "", to keep whatever is attached now;
     - `null` is refused. Graph treats null as "detach", but many clients send
       null for every optional field they aren't using, and a budget edit must
-      never silently strip a value rule. Pass "" to detach.
+      never silently strip a value rule.
+    To detach the ad set's value rule set, pass `detach_value_rule_set=true` (and no
+    `value_rule_set_id`). Nothing else detaches it.
     The result says what happened to the value rule set. Read the ad set back
     afterwards: `read_ad_set` returns `value_rule_set_id`.
+
+    `end_time`: an ISO 8601 time sets the end. A blank `end_time` changes nothing. To remove
+    the end date (run ongoing), pass `clear_end_time=true` instead: it sends Graph's
+    end_time=0. Meta allows that only with a daily budget, so the tool reads the ad set first
+    and refuses unless it has one.
 
     Money: `daily_budget`, `lifetime_budget` and `bid_amount` are whole numbers in the ad
     account's minor currency units (cents for USD, EUR, GBP, CAD, AUD, so 1000 = 10.00; whole
@@ -693,9 +702,9 @@ async def update_ad_set(
         return _json(
             {
                 "error": (
-                    "value_rule_set_id is null. Nothing was changed. Pass \"\" to detach the "
-                    "ad set's value rule set, a value rule set ID to attach one, or leave the "
-                    "field out (or pass \"keep\") to keep the current one."
+                    "value_rule_set_id is null. Nothing was changed. Pass detach_value_rule_set=true "
+                    "to detach the ad set's value rule set, a value rule set ID to attach one, or leave "
+                    "the field out (or pass \"keep\") to keep the current one."
                 )
             }
         )
@@ -800,8 +809,25 @@ async def update_ad_set(
         )
     if start_time:
         payload["start_time"] = start_time
-    if end_time:
-        payload["end_time"] = end_time
+    if clear_end_time and end_time and str(end_time).strip():
+        return _json({"error": "Pass end_time or clear_end_time=true, not both. Nothing was changed."})
+    if clear_end_time:
+        # Graph: end_time=0 = ongoing, no end date, for daily budgets only. Check first.
+        budget_now = await make_api_request(ad_set_id, meta_access_token, {"fields": "daily_budget,lifetime_budget"})
+        has_daily = (
+            isinstance(budget_now, dict)
+            and "error" not in budget_now
+            and str(budget_now.get("daily_budget") or "0").isdigit()
+            and int(str(budget_now.get("daily_budget") or "0")) > 0
+        )
+        if daily_budget is None and not has_daily:
+            return _json({"error": (
+                "clear_end_time needs an ad set with a daily budget (Meta allows no end date only then), and "
+                "this one has none or it couldn't be read. Nothing was changed."
+            )})
+        payload["end_time"] = "0"
+    elif end_time and str(end_time).strip():
+        payload["end_time"] = str(end_time).strip()
     if placement_soft_opt_out is not None and placement_normalized is not None:
         payload["placement_soft_opt_out"] = _encode_placement_soft_opt_out(placement_normalized)
     if attribution_spec is not None:
@@ -814,9 +840,15 @@ async def update_ad_set(
         payload["dsa_beneficiary"] = dsa_beneficiary
     if dsa_payor is not None:
         payload["dsa_payor"] = dsa_payor
-    if str(value_rule_set_id).strip() != _KEEP_VALUE_RULE_SET:
-        # An ID attaches; an empty string detaches (verified against the live API).
-        payload["value_rule_set_id"] = str(value_rule_set_id).strip()
+    rule_set = str(value_rule_set_id).strip()
+    attach = rule_set if rule_set and rule_set != _KEEP_VALUE_RULE_SET else None
+    if detach_value_rule_set and attach:
+        return _json({"error": "Pass value_rule_set_id or detach_value_rule_set=true, not both. Nothing was changed."})
+    if detach_value_rule_set:
+        payload["value_rule_set_id"] = ""  # Graph: "" detaches (verified against the live API)
+    elif attach:
+        payload["value_rule_set_id"] = attach
+    # "" and spaces are "keep" (ADS-61): clients pad unused fields with them.
 
     if not payload:
         # If the only thing the caller passed was a dropped create-only field
