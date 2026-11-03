@@ -235,12 +235,25 @@ async def test_with_advantage_audience_on_the_floor_and_the_suggestion_are_both_
     assert {k: sent.get(k) for k in kept} == kept and sent["age_max"] == 65
 
 
+_ON_WITH_SUGGESTION = dict(CURRENT, age_min=21, age_max=65, age_range=[35, 65], targeting_automation={"advantage_audience": 1})
+_OFF = {"targeting_automation": {"advantage_audience": 0}}
+
+
 @pytest.mark.asyncio
-async def test_turning_advantage_audience_off_drops_the_suggestion():
-    """Errata's Low on ADS-105: off with both age_min and age_range left is the ADS-56 contradiction."""
-    current = dict(CURRENT, age_min=21, age_max=65, age_range=[35, 65], targeting_automation={"advantage_audience": 1})
-    out, sent = await _patch(current, {"targeting_automation": {"advantage_audience": 0}})
-    assert sent["age_min"] == 21 and "age_range" not in sent
+async def test_turning_advantage_audience_off_without_ages_is_refused_not_guessed():
+    """Errata's blocker on ADS-109: dropping the suggestion turns a 35-65 target into a hard 21-65."""
+    out, sent = await _patch(_ON_WITH_SUGGESTION, _OFF)
+    assert sent is None and "say which ages to keep" in out["error"] and "[35, 65]" in out["error"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ages, expected", [
+    ({"age_min": 35, "age_max": 65}, {"age_min": 35, "age_max": 65, "age_range": None}),
+    ({"age_range": [35, 65]}, {"age_min": None, "age_max": None, "age_range": [35, 65]}),
+])
+async def test_turning_advantage_audience_off_with_ages_sends_one_kind(ages, expected):
+    out, sent = await _patch(_ON_WITH_SUGGESTION, {**_OFF, **ages})
+    assert {k: sent.get(k) for k in expected} == expected
 
 
 @pytest.mark.asyncio
