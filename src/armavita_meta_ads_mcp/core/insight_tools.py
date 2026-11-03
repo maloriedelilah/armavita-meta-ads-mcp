@@ -68,6 +68,7 @@ def _append_warnings(payload: Dict[str, Any], warnings: List[Dict[str, Any]]) ->
 
 
 _INCREMENT_WORDS = {"monthly", "all_days"}
+MAX_PAGE_SIZE = 500
 
 
 def _time_increment(value: Any) -> tuple[Optional[str], Optional[str]]:
@@ -79,7 +80,7 @@ def _time_increment(value: Any) -> tuple[Optional[str], Optional[str]]:
         word = value.strip().lower()
         if word in _INCREMENT_WORDS:
             return word, None
-        if not word.isdigit():
+        if not (word.isascii() and word.isdigit()) or len(word) > 3:
             return None, why
         value = int(word)
     if isinstance(value, int) and 1 <= value <= 90:
@@ -115,7 +116,10 @@ async def list_insights(
     "monthly" one per calendar month; "all_days" (Graph's default) one row for the whole
     range. Daily numbers for a week of ad sets are then one call: date_range "last_7d",
     level "adset", time_increment 1. Rows multiply (days x objects), so follow the paging
-    cursor until there is no `next`.
+    cursor until there is no `next`, and send the same arguments with each `page_cursor`
+    (the cursor only says where to resume). Without `date_range` the range is "maximum".
+
+    `page_size` is rows per page, 1 to 500.
     """
     if not str(object_id or "").strip():
         return json.dumps({"error": "An object_id (account, campaign, ad set, or ad) is required"}, indent=2)
@@ -128,6 +132,12 @@ async def list_insights(
                 "message": f"level must be one of {sorted(_VALID_LEVELS)}.",
                 "provided": level,
             },
+            indent=2,
+        )
+
+    if isinstance(page_size, bool) or not isinstance(page_size, int) or not 1 <= page_size <= MAX_PAGE_SIZE:
+        return json.dumps(
+            {"error": "invalid_page_size", "message": f"page_size must be a whole number from 1 to {MAX_PAGE_SIZE}.", "provided": page_size},
             indent=2,
         )
 
