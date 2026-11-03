@@ -242,7 +242,7 @@ class ResearchDataIndex:
 
     async def search_records(self, query: str, meta_access_token: str) -> List[str]:
         """Search Meta Ads data and return matching record IDs."""
-        logger.info(f"Running research search for query: {query}")
+        logger.debug("Running research search")
 
         query_terms = re.findall(r"\w+", query.lower())
         if not query_terms:
@@ -314,7 +314,7 @@ class ResearchDataIndex:
             logger.error(f"Error during search_web_content operation: {e}")
             return []
 
-        logger.info(f"Research search finished with {len(matching_ids)} hits")
+        logger.debug("Research search finished with %d hits", len(matching_ids))
         return matching_ids[:50]
 
     @staticmethod
@@ -394,7 +394,7 @@ class ResearchDataIndex:
 
     async def fetch_record(self, record_id: str, meta_access_token: Optional[str]) -> Optional[Dict[str, Any]]:
         """Fetch a record by ID. Uses cache first, then Graph API fallback."""
-        logger.info(f"Loading research record {record_id}")
+        logger.debug("Loading a research record")
 
         cached = self._cache.get(record_id)
         if cached:
@@ -411,7 +411,7 @@ class ResearchDataIndex:
             self._cache_record(fetched)
             return fetched
 
-        logger.warning(f"Record not found via cache or API fallback: {record_id}")
+        logger.warning("Research record not found via cache or API fallback")
         return None
 
 
@@ -466,7 +466,7 @@ async def read_web_content(resource_id: str) -> str:
     try:
         record = await _data_manager.fetch_record(resource_id, meta_access_token)
         if record:
-            logger.info(f"Record fetched successfully: {resource_id}")
+            logger.debug("Research record fetched")
             return json.dumps(record, indent=2)
 
         return json.dumps({"error": f"Record not found: {resource_id}", "resource_id": resource_id}, indent=2)

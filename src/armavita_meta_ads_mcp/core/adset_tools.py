@@ -706,8 +706,9 @@ async def update_ad_set(
     account's minor currency units (cents for USD, EUR, GBP, CAD, AUD, so 1000 = 10.00; whole
     units for JPY, KRW and other currencies without cents). read_ad_account shows the
     currency. Each must be more than 0. A budget change takes effect at once on a running ad
-    set. Raising a budget to more than 3x its current value is refused unless
-    `confirm_budget_increase=true`.
+    set. Without `confirm_budget_increase=true`, a budget change is refused when it raises
+    the budget to more than 3x its current value, switches between daily and lifetime, or
+    the current budget can't be read from Meta.
     """
     status, status_error = status_policy.update_status(status)
     if status_error:
@@ -748,15 +749,15 @@ async def update_ad_set(
 
     new_budgets = {k: v for k, v in (("daily_budget", daily_budget), ("lifetime_budget", lifetime_budget)) if v is not None}
     increase_check: Optional[str] = None
-    if new_budgets and not confirm_budget_increase:
-        current = await make_api_request(ad_set_id, meta_access_token, {"fields": "daily_budget,lifetime_budget"})
-        if isinstance(current, dict) and "error" not in current:
-            increase_error = money.increase_problems(current, new_budgets, bool(confirm_budget_increase))
+    if new_budgets:
+        if confirm_budget_increase:
+            increase_check = "confirmed"
+        else:
+            current = await make_api_request(ad_set_id, meta_access_token, {"fields": "daily_budget,lifetime_budget"})
+            increase_error = money.budget_change_problem(current, new_budgets)
             if increase_error:
                 return _json({"error": increase_error})
             increase_check = "passed"
-        else:
-            increase_check = "skipped: the current budget couldn't be read"
 
     if optimization_goal == "APP_INSTALLS":
         app_error = _validate_promoted_object_for_app_installs(optimization_goal, promoted_object)

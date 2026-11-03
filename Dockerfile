@@ -1,4 +1,6 @@
-FROM python:3.11-slim AS armavita-runtime
+# Pinned by digest (ADS-63): a tag moves, and two builds weeks apart would run different
+# bases with no diff to show for it. To upgrade, look up the new digest and change it here.
+FROM python:3.11-slim@sha256:db20d8506e2f15b6db39b40b6015ca46bae855dec6dd326d462cfe79ae972893 AS armavita-runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -7,20 +9,21 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /opt/armavita
 
-RUN apt-get update \
-    && apt-get install --yes --no-install-recommends ca-certificates gcc \
-    && rm -rf /var/lib/apt/lists/*
+# uv itself, pinned by version and digest, from Astral's image (no pip-installed, unpinned uv).
+COPY --from=ghcr.io/astral-sh/uv:0.11.32@sha256:df4cae8f3a96d175e2e5f992e597550000edbe78fdc2594d5cd8de1a217f504c /uv /usr/local/bin/uv
 
-RUN python -m pip install --upgrade pip setuptools wheel \
-    && python -m pip install --no-cache-dir uv
+# Dependencies come from uv.lock, hash-checked, so the image gets exactly the versions the
+# tests ran against (ADS-63: the old `-e .` install re-resolved floors like requests>=2.32.3).
+# Every dependency ships wheels, so no compiler is installed.
+COPY pyproject.toml uv.lock README.md ./
+RUN uv export --frozen --no-dev --no-emit-project --format requirements-txt -o /tmp/requirements.lock \
+    && uv pip install --system --require-hashes --requirement /tmp/requirements.lock \
+    && rm /tmp/requirements.lock
 
-# requirements.txt is `-e .`, so the project metadata (pyproject.toml, README.md)
-# and source must be present BEFORE the install runs, or the editable build fails.
-COPY pyproject.toml README.md ./
+# Then the project itself, without touching the locked dependencies.
 COPY src ./src
 COPY scripts ./scripts
-COPY requirements.txt ./requirements.txt
-RUN uv pip install --system --requirement requirements.txt
+RUN uv pip install --system --no-deps .
 
 ENV PYTHONPATH=/opt/armavita/src
 

@@ -256,7 +256,8 @@ def _compute_delta(current: Dict[str, Any], prior: Dict[str, Any]) -> Dict[str, 
     return delta
 
 
-@mcp_server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True))
+# Read-only (ADS-63): it reads insights and builds the report in memory; nothing is written.
+@mcp_server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True))
 @meta_api_tool
 async def create_report(
     ad_account_id: str,

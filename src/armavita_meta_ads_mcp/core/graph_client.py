@@ -134,9 +134,14 @@ def _sanitize_url(raw_url: str) -> str:
         query_pairs = parse_qsl(parts.query, keep_blank_values=True)
         filtered_pairs = [(key, value) for key, value in query_pairs if key.lower() != "access_token"]
         sanitized_query = urlencode(filtered_pairs, doseq=True)
-        return urlunsplit((parts.scheme, parts.netloc, parts.path, sanitized_query, parts.fragment))
+        cleaned = urlunsplit((parts.scheme, parts.netloc, parts.path, sanitized_query, parts.fragment))
     except Exception:  # noqa: BLE001
-        return raw_url
+        cleaned = raw_url
+    # Also an encoded access_token%3D... nested in another parameter, and plain text that
+    # isn't a URL at all (ADS-63).
+    from .log_redaction import redact
+
+    return redact(cleaned)
 
 
 def _sanitize_response_payload(value: Any) -> Any:
@@ -313,8 +318,7 @@ async def make_api_request(
             except Exception as exc:  # noqa: BLE001
                 logger.error("Graph request failed: %s", type(exc).__name__)
                 message = str(exc)
-                if "access_token=" in message.lower():
-                    message = _sanitize_url(message)
+                message = _sanitize_url(message)
                 return {"error": {"message": message}}
 
     return {"error": {"message": "Max retries exceeded contacting the Meta Graph API"}}

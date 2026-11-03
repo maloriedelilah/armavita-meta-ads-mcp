@@ -148,11 +148,45 @@ async def test_raising_a_budget_more_than_3x_needs_confirming(module, call):
 
 
 @pytest.mark.asyncio
-async def test_a_failed_budget_read_doesnt_block_the_change_but_says_so():
+@pytest.mark.parametrize("module, call", [
+    (campaign_tools, lambda **kw: update_campaign(campaign_id="c1", meta_access_token="t", **kw)),
+    (adset_tools, lambda **kw: update_ad_set(ad_set_id="as1", meta_access_token="t", **kw)),
+])
+async def test_a_failed_budget_read_fails_closed(module, call):
+    """Errata's Low 1: a rate-limited read must not let an unchecked budget through."""
+    with patch.object(module, "make_api_request", new_callable=AsyncMock) as api:
+        api.side_effect = lambda *a, **k: {"error": {"code": 17}} if k.get("method") != "POST" else {"success": True}
+        refused = await call(daily_budget=5000)
+        assert "couldn't be read" in _error(refused) and _posts(api) == []
+        confirmed = _out(await call(daily_budget=5000, confirm_budget_increase=True))
+    assert confirmed["budget_increase_check"] == "confirmed" and _posts(api)[-1].args[2]["daily_budget"] == "5000"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("module, call", [
+    (campaign_tools, lambda **kw: update_campaign(campaign_id="c1", meta_access_token="t", **kw)),
+    (adset_tools, lambda **kw: update_ad_set(ad_set_id="as1", meta_access_token="t", **kw)),
+])
+@pytest.mark.parametrize("current, change", [
+    ({"daily_budget": "1000"}, {"lifetime_budget": 10_000_000}),
+    ({"lifetime_budget": "500000"}, {"daily_budget": 2000}),
+])
+async def test_switching_budget_type_needs_confirming(module, call, current, change):
+    """Errata's Low 2: daily 1000 -> lifetime 10,000,000 had no like-for-like value and slipped through."""
+    with patch.object(module, "make_api_request", new_callable=AsyncMock) as api:
+        api.side_effect = lambda *a, **k: current if k.get("method") != "POST" else {"success": True}
+        refused = await call(**change)
+        assert "switches the budget" in _error(refused) and _posts(api) == []
+        assert "error" not in _out(await call(confirm_budget_increase=True, **change))
+
+
+@pytest.mark.asyncio
+async def test_an_ad_set_with_no_budget_of_its_own_can_be_given_one():
+    """Under a campaign budget an ad set has neither kind; there is nothing to compare or switch from."""
     with patch.object(adset_tools, "make_api_request", new_callable=AsyncMock) as api:
-        api.side_effect = lambda *a, **k: {"error": {"code": 2}} if k.get("method") != "POST" else {"success": True}
+        api.side_effect = lambda *a, **k: {"id": "as1"} if k.get("method") != "POST" else {"success": True}
         out = _out(await update_ad_set(ad_set_id="as1", meta_access_token="t", daily_budget=5000))
-    assert out["budget_increase_check"].startswith("skipped")
+    assert out["budget_increase_check"] == "passed"
 
 
 @pytest.mark.asyncio

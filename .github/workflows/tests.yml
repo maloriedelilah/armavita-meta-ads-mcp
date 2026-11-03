@@ -37,3 +37,14 @@ jobs:
       # real Meta credentials, so no secrets are required here.
       - name: Run tests
         run: uv run pytest
+
+  image:
+    # ADS-63: the Dockerfile installs from uv.lock with hashes and no compiler; prove it builds.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image
+        run: docker build -t armavita-ci .
+      - name: The installed server imports and answers --help
+        run: docker run --rm armavita-ci --help
