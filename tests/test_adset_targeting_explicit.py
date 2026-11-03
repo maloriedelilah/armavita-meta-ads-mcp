@@ -223,6 +223,19 @@ async def test_a_read_back_age_range_doesnt_contradict_a_patched_age_min():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("patch_, kept", [
+    ({"age_min": 25}, {"age_min": 25, "age_range": [35, 65]}),
+    ({"age_range": [45, 65]}, {"age_min": 21, "age_range": [45, 65]}),
+])
+async def test_with_advantage_audience_on_the_floor_and_the_suggestion_are_both_kept(patch_, kept):
+    """Meta's Advantage+ audience doc: age_min (18-25) is a floor, age_range a suggestion.
+    Patching one must not drop the other (Wren, ADS-104)."""
+    current = dict(CURRENT, age_min=21, age_max=65, age_range=[35, 65], targeting_automation={"advantage_audience": 1})
+    out, sent = await _patch(current, patch_)
+    assert {k: sent.get(k) for k in kept} == kept and sent["age_max"] == 65
+
+
+@pytest.mark.asyncio
 async def test_legacy_exclusions_mean_a_patch_is_refused_not_silently_dropped():
     current = dict(CURRENT, exclusions={"interests": [{"id": "1"}]})
     out, sent = await _patch(current, {"age_min": 25})

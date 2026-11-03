@@ -179,8 +179,9 @@ def _apply_targeting_patch(current: Dict[str, Any], patch: Dict[str, Any]) -> tu
     - geo_locations is merged one level down: {"cities": [...]} adds or changes cities and keeps
       countries and location_types; a sub-key set to null is removed (ADS-56 review).
     - targeting_automation can't be removed or nulled; give its new value instead.
-    - Setting age_min/age_max drops a read-back age_range (and the reverse), so the two
-      can't contradict each other.
+    - With Advantage+ audience off, setting age_min/age_max drops a read-back age_range (and
+      the reverse), so the two can't contradict each other. With it on, they mean different
+      things (age_min is the floor, 18-25; age_range is the suggestion), so both are kept.
     """
     if "targeting_automation" in patch and not isinstance(patch["targeting_automation"], dict):
         return None, "targeting_automation can't be removed or set to null in a patch; give {\"advantage_audience\": 0} or 1"
@@ -203,6 +204,8 @@ def _apply_targeting_patch(current: Dict[str, Any], patch: Dict[str, Any]) -> tu
             merged.pop(key, None)
         else:
             merged[key] = value
+    if (merged.get("targeting_automation") or {}).get("advantage_audience") == 1:
+        return merged, None
     if ("age_min" in patch or "age_max" in patch) and "age_range" not in patch:
         merged.pop("age_range", None)
     if "age_range" in patch:
@@ -687,8 +690,9 @@ async def update_ad_set(
 
     Meta's rules worth knowing (seen live, Nov 2026):
     - With Advantage+ audience on (`targeting_automation.advantage_audience: 1`), `age_min`
-      can't be above 25; Meta refuses it. Give an older age as a suggestion instead, or turn
-      Advantage+ audience off.
+      is a hard floor of 18-25 (Meta refuses more) and `age_max` is fixed at 65. Put older
+      ages in `age_range` as a suggestion, e.g. `{"age_min": 25, "age_range": [35, 65]}`; a
+      `targeting_patch` keeps age_min and age_range side by side. Or turn Advantage+ audience off.
     - One change per ad set every 30 seconds: put every change to an ad set in one call. A
       second call within 30 s is refused (nothing changes) and says when to try again.
     - Meta adds "frequently_in" to `geo_locations.location_types` whenever targeting is saved,
