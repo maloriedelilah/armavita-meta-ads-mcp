@@ -369,8 +369,10 @@ async def update_campaign(
     account's minor currency units (cents for USD, EUR, GBP, CAD, AUD, so 1000 = 10.00; whole
     units for JPY, KRW and other currencies without cents). read_ad_account shows the currency.
     Each must be more than 0; `spend_cap` may also be 922337203685478 (Graph's "no cap").
-    A budget change takes effect at once on a running campaign. Raising a budget to more
-    than 3x its current value is refused unless `confirm_budget_increase=true`.
+    A budget change takes effect at once on a running campaign. Without
+    `confirm_budget_increase=true`, a budget change is refused when it raises the budget to
+    more than 3x its current value, switches between daily and lifetime, or the current
+    budget can't be read from Meta.
 
     `use_ad_set_level_budgets=true` clears the campaign budget (moving budgets to the ad
     sets), so it can't be combined with `daily_budget` or `lifetime_budget`.
@@ -390,16 +392,16 @@ async def update_campaign(
         return _json({"error": money_error})
 
     new_budgets = {k: v for k, v in (("daily_budget", daily_budget), ("lifetime_budget", lifetime_budget)) if v is not None}
-    increase_check = None
-    if new_budgets and not confirm_budget_increase:
-        current = await make_api_request(campaign_id, meta_access_token, {"fields": "daily_budget,lifetime_budget"})
-        if isinstance(current, dict) and "error" not in current:
-            increase_error = money.increase_problems(current, new_budgets, bool(confirm_budget_increase))
+    increase_check: Optional[str] = None
+    if new_budgets:
+        if confirm_budget_increase:
+            increase_check = "confirmed"
+        else:
+            current = await make_api_request(campaign_id, meta_access_token, {"fields": "daily_budget,lifetime_budget"})
+            increase_error = money.budget_change_problem(current, new_budgets)
             if increase_error:
                 return _json({"error": increase_error})
             increase_check = "passed"
-        else:
-            increase_check = "skipped: the current budget couldn't be read"
 
     payload: Dict[str, Any] = {}
 

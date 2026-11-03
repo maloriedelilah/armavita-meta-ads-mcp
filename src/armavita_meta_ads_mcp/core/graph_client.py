@@ -46,6 +46,10 @@ _RETRYABLE_GRAPH_CODES = frozenset({4, 17, 32, 613})
 # duplicate side effects (e.g. double-creating a campaign/ad).
 _SERVER_ERROR_STATUS = frozenset({500, 502, 503, 504})
 _IDEMPOTENT_METHODS = frozenset({"GET", "DELETE"})
+_MAY_HAVE_BEEN_APPLIED = (
+    "This change may have been applied even though no success reply came back. "
+    "Read the object back (or list the account's objects) before retrying, so nothing is created twice."
+)
 
 
 def _backoff_seconds(attempt: int) -> float:
@@ -237,9 +241,12 @@ async def make_api_request(
                 code = error_obj.get("code") if isinstance(error_obj, dict) else None
                 status = exc.response.status_code
 
-                # Rate-limit (429 / Meta codes) -> safe to retry for any method.
-                # Server 5xx -> retry only idempotent methods (avoid duplicate writes).
-                is_rate_limited = status == 429 or code in _RETRYABLE_GRAPH_CODES
+                # Rate-limit (429, or Meta's rate-limit codes on a 4xx) -> Graph refused the
+                # call before doing anything, so it is safe to retry for any method. The same
+                # codes inside a 5xx are not that promise: a POST may already have landed
+                # (ADS-59: POST 500 {"code":4} made four campaigns). 5xx -> retry only
+                # idempotent methods.
+                is_rate_limited = status == 429 or (code in _RETRYABLE_GRAPH_CODES and 400 <= status < 500)
                 is_retryable_server = status in _SERVER_ERROR_STATUS and method in _IDEMPOTENT_METHODS
                 if (is_rate_limited or is_retryable_server) and attempt < _MAX_RETRY_ATTEMPTS:
                     delay = _retry_after_seconds(exc.response) or _backoff_seconds(attempt)
@@ -266,7 +273,7 @@ async def make_api_request(
                         }
                     }
 
-                return {
+                failure = {
                     "error": {
                         "message": f"HTTP Error: {status}",
                         "details": error_payload,
@@ -277,6 +284,10 @@ async def make_api_request(
                         },
                     }
                 }
+                if status >= 500 and method not in _IDEMPOTENT_METHODS:
+                    failure["error"]["write_outcome"] = "unknown"
+                    failure["error"]["next_step"] = _MAY_HAVE_BEEN_APPLIED
+                return failure
 
             except httpx.TransportError as exc:
                 # Network/timeout errors are ambiguous for writes (the request may have
@@ -293,7 +304,16 @@ async def make_api_request(
                 message = str(exc)
                 if "access_token=" in message.lower():
                     message = _sanitize_url(message)
-                return {"error": {"message": message}}
+                failure = {"error": {"message": message}}
+                if method not in _IDEMPOTENT_METHODS:
+                    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
+                        # The connection never opened, so Meta never saw the request.
+                        failure["error"]["write_outcome"] = "not_sent"
+                    else:
+                        # Sent, but no reply (read timeout, dropped connection): it may have landed.
+                        failure["error"]["write_outcome"] = "unknown"
+                        failure["error"]["next_step"] = _MAY_HAVE_BEEN_APPLIED
+                return failure
 
             except Exception as exc:  # noqa: BLE001
                 logger.error("Graph request failed: %s", type(exc).__name__)
@@ -361,9 +381,9 @@ def meta_api_tool(func):
 
             if isinstance(result, str):
                 try:
-                    parsed = json.loads(result)
-                    if isinstance(parsed, dict) and isinstance(parsed.get("error"), str):
-                        return json.dumps({"data": result}, indent=2)
+                    json.loads(result)
+                    # JSON goes back as it is. An error stays at the top level, where the MCP
+                    # layer turns it into isError (ADS-59); it is never re-wrapped as {"data": ...}.
                     return result
                 except Exception:  # noqa: BLE001
                     return json.dumps({"data": result}, indent=2)

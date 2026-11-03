@@ -16,8 +16,8 @@ _PATCH_TARGET = "armavita_meta_ads_mcp.core.value_rule_tools.make_api_request"
 
 
 def _tool_error(raw: str) -> str:
-    # meta_api_tool wraps tool-level validation errors in a {"data": "<json>"} envelope.
-    return json.loads(json.loads(raw)["data"])["error"]
+    # ADS-59: tool-level errors come back as the tool's own JSON, never re-wrapped in {"data": ...}.
+    return json.loads(raw)["error"]
 
 
 @pytest.mark.asyncio

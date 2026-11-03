@@ -484,7 +484,12 @@ async def _forward_duplication_request(
         graph_error = _unwrap_graph_error(data)
         if graph_error:
             code = graph_error.get("code")
-            if code == 4:
+            # graph_client marks a POST that got a 5xx or no reply as write_outcome "unknown"
+            # (ADS-59). Unwrapping to Graph's own error drops that, so carry it across: a copy
+            # that may already exist must never be answered with "retry".
+            outer = data.get("error") if isinstance(data.get("error"), dict) else {}
+            outcome = outer.get("write_outcome")
+            if code == 4 and outcome != "unknown":
                 raise RateLimitError(
                     json.dumps(
                         {
@@ -500,12 +505,12 @@ async def _forward_duplication_request(
                     )
                 )
 
-            raise DuplicationError(
-                json.dumps(
-                    _build_graph_error_payload(resource_type, resource_id, graph_error),
-                    indent=2,
-                )
-            )
+            failure = _build_graph_error_payload(resource_type, resource_id, graph_error)
+            if outcome:
+                failure["write_outcome"] = outcome
+            if outer.get("next_step"):
+                failure["next_step"] = outer["next_step"]
+            raise DuplicationError(json.dumps(failure, indent=2))
 
         new_id = _extract_new_id(resource_type, data)
         success = bool(new_id) or bool(data.get("success") is True)

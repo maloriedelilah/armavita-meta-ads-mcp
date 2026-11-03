@@ -795,7 +795,7 @@ async def update_ad(
         payload["bid_amount"] = str(bid_amount)
     if tracking_specs is not None:
         payload["tracking_specs"] = json.dumps(tracking_specs)
-    if ad_creative_id is not None:
+    if ad_creative_id is not None and str(ad_creative_id).strip():
         # Pass a plain dict (matching create_ad) so the shared request pipeline
         # remaps ad_creative_id -> creative_id and JSON-encodes it. Pre-serializing
         # here would hide the inner key from the remapper and send the invalid
@@ -1329,7 +1329,9 @@ async def create_ad_creative(
       * `facebook_page_id` — the Page the ad runs under. Give it. If it's left out it is
         filled in only when every place Pages are listed answered and they show exactly
         one Page; otherwise the call is refused and the reply lists what it found (use
-        list_account_pages to see them first).
+        list_account_pages to see them first). A token without business_management, such
+        as the hosted connector's, can't read the business Page lists, so there the Page is
+        never filled in: always pass facebook_page_id.
         The reply's `facebook_page_id_used` says which Page was used.
       * `instagram_user_id` — required for IG delivery (`instagram_actor_id`
         deprecated all-versions Sep 9, 2025).
@@ -1614,7 +1616,10 @@ async def update_ad_creative(
     if name:
         update_payload["name"] = name
 
-    if optimization_type or dynamic_creative_spec or ad_formats:
+    # asset_feed_spec REPLACES the creative's feed, so it is sent only when the caller asked
+    # to change the feed itself (ad_formats or optimization_type), never as a side effect of
+    # a dynamic_creative_spec edit (ADS-61).
+    if optimization_type or ad_formats:
         resolved_update_formats = list(ad_formats) if ad_formats else (
             ["AUTOMATIC_FORMAT"] if optimization_type == "DEGREES_OF_FREEDOM" else ["SINGLE_IMAGE"]
         )
