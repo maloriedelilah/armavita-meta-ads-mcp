@@ -46,6 +46,8 @@ _RETRYABLE_GRAPH_CODES = frozenset({4, 17, 32, 613})
 # duplicate side effects (e.g. double-creating a campaign/ad).
 _SERVER_ERROR_STATUS = frozenset({500, 502, 503, 504})
 _IDEMPOTENT_METHODS = frozenset({"GET", "DELETE"})
+# Meta's per-object write limit: one change to the same ad set (etc.) every 30 seconds.
+_PER_OBJECT_WRITE_LIMIT_SUBCODE = 4841018
 _MAY_HAVE_BEEN_APPLIED = (
     "This change may have been applied even though no success reply came back. "
     "Read the object back (or list the account's objects) before retrying, so nothing is created twice."
@@ -247,6 +249,11 @@ async def make_api_request(
                 # (ADS-59: POST 500 {"code":4} made four campaigns). 5xx -> retry only
                 # idempotent methods.
                 is_rate_limited = status == 429 or (code in _RETRYABLE_GRAPH_CODES and 400 <= status < 500)
+                # One object's own write limit ("1 calls per 30 seconds", 613/4841018): a retry
+                # within our short backoff only fails again, so say when to try instead (ADS-100).
+                subcode = error_obj.get("error_subcode") if isinstance(error_obj, dict) else None
+                if code == 613 and subcode == _PER_OBJECT_WRITE_LIMIT_SUBCODE:
+                    is_rate_limited = False
                 is_retryable_server = status in _SERVER_ERROR_STATUS and method in _IDEMPOTENT_METHODS
                 if (is_rate_limited or is_retryable_server) and attempt < _MAX_RETRY_ATTEMPTS:
                     delay = _retry_after_seconds(exc.response) or _backoff_seconds(attempt)
@@ -287,6 +294,12 @@ async def make_api_request(
                 if status >= 500 and method not in _IDEMPOTENT_METHODS:
                     failure["error"]["write_outcome"] = "unknown"
                     failure["error"]["next_step"] = _MAY_HAVE_BEEN_APPLIED
+                elif code == 613 and error_obj.get("error_subcode") == _PER_OBJECT_WRITE_LIMIT_SUBCODE:
+                    failure["error"]["write_outcome"] = "not_applied"
+                    failure["error"]["next_step"] = (
+                        "Meta allows one change to the same object every 30 seconds. Nothing was changed: "
+                        "wait 30 seconds and send it again, with every change to this object in one call."
+                    )
                 return failure
 
             except httpx.TransportError as exc:
