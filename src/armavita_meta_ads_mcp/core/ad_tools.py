@@ -1298,6 +1298,9 @@ async def _resolve_page_id_for_creative(
     }
 
 
+_AI_DISCLOSURE_VALUES = {"OPT_IN", "OPT_OUT"}
+
+
 @mcp_server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True))
 @meta_api_tool
 async def create_ad_creative(
@@ -1331,8 +1334,18 @@ async def create_ad_creative(
     product_set_id: Optional[str] = None,
     url_tags: Optional[str] = None,
     display_link: Optional[str] = None,
+    self_ai_disclosure: Optional[str] = None,
 ) -> str:
     """Create an ad creative.
+
+    AI disclosure:
+      * `self_ai_disclosure` — "OPT_IN" declares that the creative's media was made or
+        edited with a generative AI tool; "OPT_OUT" declares it wasn't. Meta may then
+        show an "AI info" label where the law requires one (currently the European
+        region, India, Taiwan, California and New York). It can only be set here, when
+        the creative is made: no update can change it afterwards. Disclosure is the
+        advertiser's decision: ask them, and never set or guess it on their behalf.
+        Left out, nothing is declared. The reply's `self_ai_disclosure_sent` echoes it.
 
     Identity fields:
       * `facebook_page_id` — the Page the ad runs under. Give it. If it's left out it is
@@ -1364,6 +1377,18 @@ async def create_ad_creative(
     """
     if not ad_account_id:
         return _json({"error": "No account ID provided"})
+
+    disclosure = None
+    if self_ai_disclosure is not None:
+        disclosure = str(self_ai_disclosure).strip().upper()
+        if disclosure not in _AI_DISCLOSURE_VALUES:
+            return _json({
+                "error": (
+                    'self_ai_disclosure must be "OPT_IN" (the media was made or edited with generative AI) '
+                    'or "OPT_OUT" (it wasn\'t), or left out. Nothing was created.'
+                ),
+                "provided": self_ai_disclosure,
+            })
 
     ad_image_hashes = _normalize_list_argument(ad_image_hashes)
     primary_text_variants = _normalize_list_argument(primary_text_variants)
@@ -1433,6 +1458,8 @@ async def create_ad_creative(
     )
 
     creative_payload: Dict[str, Any] = {"name": final_name}
+    if disclosure:
+        creative_payload["self_ai_disclosure"] = disclosure
     if url_tags:
         creative_payload["url_tags"] = url_tags
     if product_set_id:
@@ -1546,6 +1573,7 @@ async def create_ad_creative(
             "ad_creative_id": ad_creative_id,
             # Always say which Page the ad runs under (ADS-58).
             "facebook_page_id_used": resolved_page_id,
+            "self_ai_disclosure_sent": disclosure,
             "details": details,
         })
 
@@ -1577,6 +1605,8 @@ async def update_ad_creative(
 
     Meta treats creative *content* (text/image/link) as immutable after creation;
     this tool rejects content-field edits and surfaces Meta's immutability error.
+    The AI disclosure (`self_ai_disclosure`) is set only by create_ad_creative and can't
+    be changed here: make a new creative to change it.
     Use it for name, optimization_type, dynamic_creative_spec, and related specs.
     """
     if not ad_creative_id:
