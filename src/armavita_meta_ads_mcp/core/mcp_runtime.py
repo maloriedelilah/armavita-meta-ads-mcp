@@ -51,6 +51,9 @@ class _ArmavitaFastMCP(FailuresAreErrors):
                 f"{name} doesn't take {', '.join(sorted(unknown))}. Nothing was done. "
                 "Check the tool's parameters and call it again without them."
             )
+        page_size_problem = _page_size_problem((arguments or {}).get("page_size", None))
+        if page_size_problem:
+            raise ToolError(page_size_problem)
         return await super().call_tool(name, self._without_blank_optionals(name, arguments or {}))
 
     def _without_blank_optionals(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -76,6 +79,21 @@ class _ArmavitaFastMCP(FailuresAreErrors):
             return set()  # the SDK reports an unknown tool itself
         properties = (tool.parameters or {}).get("properties") or {}
         return {key for key in arguments if key not in properties}
+
+
+MAX_PAGE_SIZE = 500
+
+
+def _page_size_problem(value: Any) -> Optional[str]:
+    """Every tool's `page_size` is 1-500 rows (Errata's Low on #36: list_insights had the only cap).
+    Checked on the raw argument, before pydantic would coerce true or "1e3"."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, str) and value.isascii() and value.isdigit() and len(value) <= 3:
+        value = int(value)
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= MAX_PAGE_SIZE:
+        return f"page_size must be a whole number from 1 to {MAX_PAGE_SIZE} (rows per page). Nothing was done."
+    return None
 
 
 mcp_server = _ArmavitaFastMCP("meta-ads")
