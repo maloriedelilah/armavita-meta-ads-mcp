@@ -186,3 +186,59 @@ def test_other_613s_are_still_retried():
     replies = iter([httpx.Response(400, json={"error": {"code": 613}}), httpx.Response(200, json={"id": "c1"})])
     run, calls = _graph(lambda r: next(replies))
     assert asyncio.run(run("POST")) == {"id": "c1"} and len(calls) == 2
+
+
+def _delete(handler):
+    calls = []
+
+    def counted(request):
+        calls.append(request)
+        return handler(request)
+
+    def client_factory(*args, **kwargs):
+        kwargs.pop("transport", None)
+        return _RealAsyncClient(*args, transport=httpx.MockTransport(counted), **kwargs)
+
+    async def run():
+        with patch.object(graph_client.httpx, "AsyncClient", side_effect=client_factory), patch.object(
+            graph_client.asyncio, "sleep", new_callable=AsyncMock
+        ):
+            return await graph_client.make_api_request("120000000000001", "t", {}, method="DELETE")
+
+    return asyncio.run(run()), calls
+
+
+_LIMIT_613 = {"error": {"code": 613, "error_subcode": 4841018, "message": "1 calls per 30 seconds"}}
+
+
+def test_a_delete_retried_after_a_timeout_never_says_not_applied():
+    """Errata's Low on ADS-100: the first DELETE may have landed before the retry was refused."""
+    replies = iter(["timeout", httpx.Response(400, json=_LIMIT_613)])
+
+    def handler(request):
+        reply = next(replies)
+        if reply == "timeout":
+            raise httpx.ReadTimeout("timed out", request=request)
+        return reply
+
+    result, calls = _delete(handler)
+    assert len(calls) == 2
+    assert result["error"]["write_outcome"] == "unknown" and "may have been applied" in result["error"]["next_step"]
+
+
+def test_a_delete_refused_at_once_is_still_not_applied():
+    result, calls = _delete(lambda r: httpx.Response(400, json=_LIMIT_613))
+    assert len(calls) == 1 and result["error"]["write_outcome"] == "not_applied"
+
+
+def test_a_delete_whose_connection_never_opened_isnt_ambiguous():
+    replies = iter(["refused", httpx.Response(400, json=_LIMIT_613)])
+
+    def handler(request):
+        reply = next(replies)
+        if reply == "refused":
+            raise httpx.ConnectError("refused", request=request)
+        return reply
+
+    result, _ = _delete(handler)
+    assert result["error"]["write_outcome"] == "not_applied"
