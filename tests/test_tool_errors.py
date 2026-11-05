@@ -242,3 +242,33 @@ def test_a_delete_whose_connection_never_opened_isnt_ambiguous():
 
     result, _ = _delete(handler)
     assert result["error"]["write_outcome"] == "not_applied"
+
+
+def test_a_delete_retried_after_a_5xx_never_says_not_applied():
+    """Errata's Low on #39: the 5xx-then-613 path, not only a timeout."""
+    replies = iter([httpx.Response(500, json={"error": {"code": 1}}), httpx.Response(400, json=_LIMIT_613)])
+    result, calls = _delete(lambda r: next(replies))
+    assert len(calls) == 2 and result["error"]["write_outcome"] == "unknown"
+
+
+def test_a_delete_that_times_out_on_every_try_says_what_became_of_it():
+    """Errata's Low on #39: the last retry's failure carried no write_outcome."""
+    def timeout(request):
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    result, calls = _delete(timeout)
+    assert len(calls) > 1 and result["error"]["write_outcome"] == "unknown"
+
+
+def test_a_pool_timeout_is_not_sent():
+    """Errata's Low on #39: PoolTimeout happens before the request leaves."""
+    replies = iter(["pool", httpx.Response(400, json=_LIMIT_613)])
+
+    def handler(request):
+        reply = next(replies)
+        if reply == "pool":
+            raise httpx.PoolTimeout("no connection free")
+        return reply
+
+    result, _ = _delete(handler)
+    assert result["error"]["write_outcome"] == "not_applied"
