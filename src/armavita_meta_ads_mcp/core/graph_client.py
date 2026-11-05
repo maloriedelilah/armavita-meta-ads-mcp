@@ -201,6 +201,9 @@ async def make_api_request(
 
     logger.debug("Graph request method=%s url=%s params=%s", method, url, request_params)
 
+    # A DELETE retried after a try that may have landed (5xx, or sent with no reply) can't
+    # later report "not_applied": the first try may have done it (Errata's Low on ADS-100).
+    earlier_try_may_have_landed = False
     async with httpx.AsyncClient(timeout=30.0) as client:
         for attempt in range(_MAX_RETRY_ATTEMPTS + 1):
             try:
@@ -256,6 +259,8 @@ async def make_api_request(
                     is_rate_limited = False
                 is_retryable_server = status in _SERVER_ERROR_STATUS and method in _IDEMPOTENT_METHODS
                 if (is_rate_limited or is_retryable_server) and attempt < _MAX_RETRY_ATTEMPTS:
+                    if is_retryable_server and method != "GET":
+                        earlier_try_may_have_landed = True
                     delay = _retry_after_seconds(exc.response) or _backoff_seconds(attempt)
                     logger.warning(
                         "meta_retry endpoint=%s status=%s code=%s attempt=%s delay=%.1fs",
@@ -291,7 +296,7 @@ async def make_api_request(
                         },
                     }
                 }
-                if status >= 500 and method not in _IDEMPOTENT_METHODS:
+                if (status >= 500 and method not in _IDEMPOTENT_METHODS) or (method != "GET" and earlier_try_may_have_landed):
                     failure["error"]["write_outcome"] = "unknown"
                     failure["error"]["next_step"] = _MAY_HAVE_BEEN_APPLIED
                 elif code == 613 and error_obj.get("error_subcode") == _PER_OBJECT_WRITE_LIMIT_SUBCODE:
@@ -306,6 +311,8 @@ async def make_api_request(
                 # Network/timeout errors are ambiguous for writes (the request may have
                 # been applied), so only retry idempotent methods; surface otherwise.
                 if method in _IDEMPOTENT_METHODS and attempt < _MAX_RETRY_ATTEMPTS:
+                    if method != "GET" and not isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
+                        earlier_try_may_have_landed = True
                     delay = _backoff_seconds(attempt)
                     logger.warning(
                         "meta_retry_transport endpoint=%s attempt=%s delay=%.1fs error=%s",
