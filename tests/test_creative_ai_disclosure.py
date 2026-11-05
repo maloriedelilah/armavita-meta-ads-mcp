@@ -54,3 +54,44 @@ def test_the_docs_say_it_is_the_advertisers_call_and_set_once():
     assert "advertiser's decision" in create_doc and "never set or guess it" in create_doc
     assert "no update can change it" in create_doc
     assert "self_ai_disclosure" in (update_ad_creative.__doc__ or "")
+
+
+from armavita_meta_ads_mcp.core.ad_tools import read_ad_creative
+
+
+async def _read(disclosure_reply):
+    async def api(endpoint, token, params, method="GET"):
+        fields = params.get("fields", "")
+        if fields == "self_ai_disclosure":
+            if isinstance(disclosure_reply, Exception):
+                raise disclosure_reply
+            return disclosure_reply
+        if fields == "dynamic_creative_spec":
+            return {"id": "c1"}
+        return {"id": "c1", "name": "Creative"}
+
+    with patch(_API, side_effect=api):
+        return json.loads(await read_ad_creative(ad_creative_id="120000000000001", meta_access_token="token"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reply, value, read", [
+    ({"id": "c1", "self_ai_disclosure": "OPT_IN"}, "OPT_IN", "ok"),
+    ({"id": "c1", "self_ai_disclosure": "OPT_OUT"}, "OPT_OUT", "ok"),
+    ({"id": "c1"}, None, "ok"),                                   # none stored
+    ({"id": "c1", "self_ai_disclosure": "weird"}, None, "ok"),     # never echo an unknown value
+    ({"error": {"message": "(#100) Tried accessing nonexisting field (self_ai_disclosure)"}}, None, "unavailable"),
+    (RuntimeError("boom"), None, "unavailable"),
+])
+async def test_read_ad_creative_always_reports_the_stored_disclosure(reply, value, read):
+    """ADS-128: Wren's read-back gate needs the stored value; a Graph version without the field
+    must not break the read, and must not look like OPT_OUT."""
+    out = await _read(reply)
+    assert out["name"] == "Creative"
+    assert out["self_ai_disclosure"] == value and out["self_ai_disclosure_read"] == read
+
+
+def test_read_ad_creative_says_it_returns_the_disclosure():
+    """The method checks this description before trusting a read-back (Wren, room 114 msg 3752)."""
+    doc = read_ad_creative.__doc__ or ""
+    assert "self_ai_disclosure" in doc and "never as OPT_OUT" in doc

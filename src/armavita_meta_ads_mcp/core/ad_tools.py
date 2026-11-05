@@ -35,6 +35,8 @@ _CREATIVE_FIELDS = (
     "id,name,status,thumbnail_url,image_url,image_hash,object_story_spec,"
     "asset_feed_spec,image_urls_for_viewing,url_tags,link_url"
 )
+# Graph's AdCreative self_ai_disclosure values (ADS-107).
+_AI_DISCLOSURE_VALUES = {"OPT_IN", "OPT_OUT"}
 _PAGE_FIELDS = "id,name,username,category,fan_count,link,verification_status,picture"
 _PREVIEW_FALLBACK_AD_FORMATS = (
     "DESKTOP_FEED_STANDARD",
@@ -585,7 +587,14 @@ async def list_ad_previews(
 @mcp_server.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
 @meta_api_tool
 async def read_ad_creative(ad_creative_id: str, meta_access_token: Optional[str] = None) -> str:
-    """Read an ad creative's full spec, including its dynamic_creative_spec when present."""
+    """Read an ad creative's full spec, including its dynamic_creative_spec when present.
+
+    The reply always has `self_ai_disclosure`: "OPT_IN" or "OPT_OUT" as Meta stored it, or
+    null when none is stored. Use it to confirm a disclosure sent with create_ad_creative was
+    kept (the create reply's `self_ai_disclosure_sent` is only an echo of what was sent). If
+    Meta couldn't be asked for it, `self_ai_disclosure_read` is "unavailable" and the value
+    is null: treat that as not confirmed, never as OPT_OUT.
+    """
     if not ad_creative_id:
         return _json({"error": "No creative ID provided"})
 
@@ -598,6 +607,18 @@ async def read_ad_creative(ad_creative_id: str, meta_access_token: Optional[str]
                 payload["dynamic_creative_spec"] = dynamic_payload["dynamic_creative_spec"]
         except Exception:  # noqa: BLE001
             pass
+        # Asked for on its own, so a Graph version without the field can't break the read (ADS-128).
+        disclosure, read = None, "unavailable"
+        try:
+            reply = await make_api_request(ad_creative_id, meta_access_token, {"fields": "self_ai_disclosure"})
+            if isinstance(reply, dict) and "error" not in reply:
+                value = reply.get("self_ai_disclosure")
+                disclosure = value if value in _AI_DISCLOSURE_VALUES else None
+                read = "ok"
+        except Exception:  # noqa: BLE001
+            pass
+        payload["self_ai_disclosure"] = disclosure
+        payload["self_ai_disclosure_read"] = read
 
     return _json(payload)
 
@@ -1296,9 +1317,6 @@ async def _resolve_page_id_for_creative(
         ),
         "pages": listed,
     }
-
-
-_AI_DISCLOSURE_VALUES = {"OPT_IN", "OPT_OUT"}
 
 
 @mcp_server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True))
