@@ -298,7 +298,9 @@ async def make_api_request(
                         },
                     }
                 }
-                if (status >= 500 and method not in _IDEMPOTENT_METHODS) or (method != "GET" and earlier_try_may_have_landed):
+                # Any write whose last reply is a 5xx may have landed, DELETE included, even when every
+                # earlier try never left (Errata's Low on #40: connect errors, then a 500).
+                if method != "GET" and (status >= 500 or earlier_try_may_have_landed):
                     failure["error"]["write_outcome"] = "unknown"
                     failure["error"]["next_step"] = _MAY_HAVE_BEEN_APPLIED
                 elif code == 613 and error_obj.get("error_subcode") == _PER_OBJECT_WRITE_LIMIT_SUBCODE:

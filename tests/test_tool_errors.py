@@ -272,3 +272,23 @@ def test_a_pool_timeout_is_not_sent():
 
     result, _ = _delete(handler)
     assert result["error"]["write_outcome"] == "not_applied"
+
+
+def test_a_delete_whose_only_sent_try_got_a_500_may_have_landed():
+    """Errata's Low on #40: connect errors on every earlier try, then a 500 on the last."""
+    replies = iter(["refused", "refused", "refused", httpx.Response(500, json={"error": {"code": 1}})])
+
+    def handler(request):
+        reply = next(replies)
+        if reply == "refused":
+            raise httpx.ConnectError("refused", request=request)
+        return reply
+
+    result, calls = _delete(handler)
+    assert len(calls) == 4
+    assert result["error"]["write_outcome"] == "unknown" and "may have been applied" in result["error"]["next_step"]
+
+
+def test_a_delete_that_got_a_500_on_every_try_may_have_landed():
+    result, calls = _delete(lambda r: httpx.Response(500, json={"error": {"code": 1}}))
+    assert len(calls) > 1 and result["error"]["write_outcome"] == "unknown"
