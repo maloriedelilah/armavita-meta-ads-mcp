@@ -48,6 +48,8 @@ _SERVER_ERROR_STATUS = frozenset({500, 502, 503, 504})
 _IDEMPOTENT_METHODS = frozenset({"GET", "DELETE"})
 # Meta's per-object write limit: one change to the same ad set (etc.) every 30 seconds.
 _PER_OBJECT_WRITE_LIMIT_SUBCODE = 4841018
+# Transport errors raised before the request left: no connection, or none free in the pool.
+_NEVER_SENT = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
 _MAY_HAVE_BEEN_APPLIED = (
     "This change may have been applied even though no success reply came back. "
     "Read the object back (or list the account's objects) before retrying, so nothing is created twice."
@@ -311,7 +313,7 @@ async def make_api_request(
                 # Network/timeout errors are ambiguous for writes (the request may have
                 # been applied), so only retry idempotent methods; surface otherwise.
                 if method in _IDEMPOTENT_METHODS and attempt < _MAX_RETRY_ATTEMPTS:
-                    if method != "GET" and not isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
+                    if method != "GET" and not isinstance(exc, _NEVER_SENT):
                         earlier_try_may_have_landed = True
                     delay = _backoff_seconds(attempt)
                     logger.warning(
@@ -325,8 +327,10 @@ async def make_api_request(
                 if "access_token=" in message.lower():
                     message = _sanitize_url(message)
                 failure = {"error": {"message": message}}
-                if method not in _IDEMPOTENT_METHODS:
-                    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
+                # Every write says what became of it, DELETE included after its last retry
+                # (Errata's Low on #39).
+                if method != "GET":
+                    if isinstance(exc, _NEVER_SENT) and not earlier_try_may_have_landed:
                         # The connection never opened, so Meta never saw the request.
                         failure["error"]["write_outcome"] = "not_sent"
                     else:
