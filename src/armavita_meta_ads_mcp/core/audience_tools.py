@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional
 
 from . import empties
 from .graph_client import make_api_request, meta_api_tool
+from .graph_constants import graph_major
 from .mcp_runtime import mcp_server
 from mcp.types import ToolAnnotations
 
@@ -303,6 +304,36 @@ async def manage_custom_audience_users(
     return _json(result)
 
 
+_LOOKALIKE_LOCATION_KEYS = ("country", "location_spec")
+_LOOKALIKE_LOCATION_REFUSED_FROM = 27
+
+
+def _without_lookalike_location(spec: Any) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """ADS-41: Graph v27 refuses country/location_spec in lookalike_spec (all versions ~Feb 2027).
+
+    Returns (spec, warning), or (None, refusal) when nothing usable is left.
+    """
+    if not isinstance(spec, dict):
+        return None, "lookalike_spec must be an object, e.g. {\"ratio\": 0.01, \"type\": \"custom_ratio\"}. Nothing was created."
+    if graph_major() < _LOOKALIKE_LOCATION_REFUSED_FROM:
+        return spec, None
+    removed = [k for k in _LOOKALIKE_LOCATION_KEYS if k in spec]
+    if not removed:
+        return spec, None
+    cleaned = {k: v for k, v in spec.items() if k not in _LOOKALIKE_LOCATION_KEYS}
+    if "ratio" not in cleaned and "type" not in cleaned:
+        return None, (
+            f"lookalike_spec had only {removed}, which Meta no longer accepts (Graph v27). Nothing was "
+            "created. Give a size instead, e.g. {\"ratio\": 0.01, \"type\": \"custom_ratio\"}, and set the "
+            "country in the ad set's geo_locations."
+        )
+    return cleaned, (
+        f"Removed {removed} from lookalike_spec: Meta no longer accepts them (Graph v27). The lookalike "
+        "is found in whatever location the ad set using it targets, so set the country in that ad set's "
+        "geo_locations."
+    )
+
+
 @mcp_server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True))
 @meta_api_tool
 async def create_lookalike_audience(
@@ -315,9 +346,12 @@ async def create_lookalike_audience(
 ) -> str:
     """Create a lookalike audience from a seed audience.
 
-    `lookalike_spec` is required (v24.0+) and typically looks like
-    `{"country": "US", "ratio": 0.01, "type": "similarity"}` or with
-    `starting_ratio` / `ratio` for custom ranges.
+    `lookalike_spec` is required and looks like `{"ratio": 0.01, "type": "custom_ratio"}`
+    (or `"type": "similarity"` / `"reach"`), with `starting_ratio` for a custom range.
+
+    Where the lookalike is found comes from the ad set's location targeting, not the spec:
+    from Graph v27 Meta refuses `country` and `location_spec` here, so this tool removes them
+    and says so in `_warning`. Set the country in the ad set's `geo_locations` instead.
     """
     normalized = _normalize_account(ad_account_id)
     if not normalized:
@@ -328,6 +362,10 @@ async def create_lookalike_audience(
         return _json({"error": "origin_audience_id is required"})
     if not lookalike_spec:
         return _json({"error": "lookalike_spec is required (v24.0+)"})
+
+    lookalike_spec, location_warning = _without_lookalike_location(lookalike_spec)
+    if lookalike_spec is None:
+        return _json({"error": location_warning})
 
     payload: Dict[str, Any] = {
         "name": name,
@@ -344,4 +382,6 @@ async def create_lookalike_audience(
         payload,
         method="POST",
     )
+    if location_warning and isinstance(result, dict):
+        result = {**result, "_warning": location_warning}
     return _json(result)
