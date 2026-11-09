@@ -17,6 +17,7 @@ from . import empties, money, status_policy
 from . import http_mode
 from . import image_limits
 from .graph_client import McpToolError, make_api_request, meta_api_tool
+from .graph_constants import graph_major
 from .mcp_runtime import mcp_server
 from mcp.types import ToolAnnotations
 from .media_helpers import (
@@ -1319,6 +1320,28 @@ async def _resolve_page_id_for_creative(
     }
 
 
+# ADS-41: from Graph v27, Meta may turn Product showcase on for a new creative that doesn't
+# say, adding catalog products it thinks match. A book ad never gets products bolted on
+# unless the caller asks (Malorie, Nov 8): unless the caller set product_extensions, opt out.
+_PRODUCT_SHOWCASE_DEFAULT_FROM = 27
+
+
+def _opt_out_of_product_showcase(creative_payload: Dict[str, Any]) -> Optional[str]:
+    """Add product_extensions OPT_OUT unless the caller chose. Returns what was sent, if this added it."""
+    if graph_major() < _PRODUCT_SHOWCASE_DEFAULT_FROM:
+        return None
+    dof = creative_payload.get("degrees_of_freedom_spec")
+    dof = dict(dof) if isinstance(dof, dict) else {}
+    features = dof.get("creative_features_spec")
+    features = dict(features) if isinstance(features, dict) else {}
+    if "product_extensions" in features:
+        return None
+    features["product_extensions"] = {"enroll_status": "OPT_OUT"}
+    dof["creative_features_spec"] = features
+    creative_payload["degrees_of_freedom_spec"] = dof
+    return "OPT_OUT"
+
+
 @mcp_server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True))
 @meta_api_tool
 async def create_ad_creative(
@@ -1551,6 +1574,7 @@ async def create_ad_creative(
         creative_payload["destination_spec"] = destination_spec
     if degrees_of_freedom_spec:
         creative_payload["degrees_of_freedom_spec"] = degrees_of_freedom_spec
+    product_showcase_sent = _opt_out_of_product_showcase(creative_payload)
     if creative_features_spec:
         creative_payload["creative_features_spec"] = creative_features_spec
 
@@ -1592,6 +1616,7 @@ async def create_ad_creative(
             # Always say which Page the ad runs under (ADS-58).
             "facebook_page_id_used": resolved_page_id,
             "self_ai_disclosure_sent": disclosure,
+            **({"product_showcase_sent": product_showcase_sent} if product_showcase_sent else {}),
             "details": details,
         })
 

@@ -12,10 +12,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from armavita_meta_ads_mcp.core import graph_constants
 
 
-def test_normalize_graph_api_version_defaults_to_v25():
-    assert graph_constants._normalize_graph_api_version("") == "v25.0"
+def test_normalize_graph_api_version_defaults_to_v27():
+    assert graph_constants._normalize_graph_api_version("") == "v27.0"
     assert graph_constants._normalize_graph_api_version("v25.0") == "v25.0"
-    assert graph_constants._normalize_graph_api_version("invalid") == "v25.0"
+    assert graph_constants._normalize_graph_api_version("invalid") == "v27.0"
 
 
 def test_normalize_graph_api_version_accepts_valid_override(monkeypatch):
