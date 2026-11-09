@@ -81,3 +81,25 @@ async def test_a_patch_on_a_live_ad_set_carrying_explore_still_goes_through_on_v
 def test_graph_major():
     assert adset_tools._graph_major("v26.0") == 26 and adset_tools._graph_major("v25.0") == 25
     assert adset_tools._graph_major("bogus") == 0
+
+
+@pytest.mark.asyncio
+async def test_explore_only_without_publisher_platforms_is_refused_not_widened():
+    """Errata #43 B1: no publisher_platforms + explore-only would become automatic placements."""
+    payload, api = await _create({"instagram_positions": ["explore"]})
+    assert "Nothing was changed" in payload["error"] and "every placement" in payload["error"]
+    api.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_explore_only_without_publisher_platforms_is_refused_on_update_too():
+    current = {"targeting": {"geo_locations": {"countries": ["US"]}, "targeting_automation": {"advantage_audience": 0},
+                             "instagram_positions": ["explore"]}}
+
+    async def api(endpoint, token, params=None, method="GET"):
+        return current if method == "GET" else {"success": True, "id": "adset_1"}
+
+    with patch(f"{MOD}.make_api_request", side_effect=api) as mock, patch(f"{MOD}.META_GRAPH_API_VERSION", "v26.0"):
+        raw = await update_ad_set(ad_set_id="adset_1", meta_access_token="token", targeting_patch={"age_min": 25})
+    assert "Nothing was changed" in json.loads(raw)["error"]
+    assert all(c.kwargs.get("method", "GET") == "GET" and (len(c.args) < 4 or c.args[3] == "GET") for c in mock.call_args_list)

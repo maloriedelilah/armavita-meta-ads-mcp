@@ -400,15 +400,18 @@ def _strip_refused_instagram_positions(
 
     cleaned.pop("instagram_positions", None)
     platforms = cleaned.get("publisher_platforms")
-    if isinstance(platforms, list):
-        rest = [p for p in platforms if str(p).strip().lower() != "instagram"]
-        if not rest:
-            return None, (
-                "Instagram Explore was this ad set's only placement, and Meta no longer accepts it "
-                "from Graph v26. Nothing was changed. Choose another placement (for example "
-                "instagram_positions [\"stream\"] or [\"explore_home\"])."
-            )
-        cleaned["publisher_platforms"] = rest
+    rest = [p for p in platforms if str(p).strip().lower() != "instagram"] if isinstance(platforms, list) else []
+    if not rest:
+        # Without a publisher_platforms list to narrow, dropping the only IG position would leave
+        # no placement fields at all, which Meta reads as automatic placements (Errata, #43 B1).
+        return None, (
+            "Instagram Explore was this ad set's only Instagram placement, and Meta no longer accepts "
+            "it from Graph v26. Nothing was changed: removing it would leave "
+            + ("no platform" if isinstance(platforms, list) else "no publisher_platforms, which Meta reads as every placement")
+            + ". Choose the placements to keep, for example instagram_positions [\"stream\"] or "
+            "[\"explore_home\"], and state publisher_platforms."
+        )
+    cleaned["publisher_platforms"] = rest
     return cleaned, (
         f"Removed instagram_positions {removed}: Meta no longer accepts the Instagram Explore "
         "placement from Graph v26. It was the only Instagram position, so Instagram was taken off "
