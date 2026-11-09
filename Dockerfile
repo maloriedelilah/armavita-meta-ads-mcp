@@ -1,6 +1,6 @@
 # Pinned by digest (ADS-63): a tag moves, and two builds weeks apart would run different
 # bases with no diff to show for it. To upgrade, look up the new digest and change it here.
-FROM python:3.11.15-slim@sha256:90744cff8f32887f075c47d747a173ff333e9e98801667af93c357fa9f5e28ff AS armavita-runtime
+FROM python:3.11.18-slim@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b597c84f7a7b535 AS armavita-runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
