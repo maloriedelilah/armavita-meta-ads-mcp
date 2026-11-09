@@ -5,6 +5,7 @@
 
 
 import json
+import re
 from typing import Any, Dict, List, Optional
 
 from . import empties, money, status_policy
@@ -358,6 +359,66 @@ def _strip_deprecated_facebook_positions(targeting: Dict[str, Any]) -> tuple[Dic
     return cleaned, warning
 
 
+# ADS-41: from Graph v26, Meta refuses the Instagram Explore placement ("IG Explore Placement
+# Is Deprecated", 2490589). Tested Nov 8 on a paused draft: `explore` refused, `explore_home`
+# accepted, so only `explore` goes.
+_IG_EXPLORE_REFUSED_FROM = 26
+_REFUSED_INSTAGRAM_POSITIONS = {"explore"}
+
+
+def _graph_major(version: str) -> int:
+    match = re.match(r"^v(\d+)\.", version or "")
+    return int(match.group(1)) if match else 0
+
+
+def _strip_refused_instagram_positions(
+    targeting: Dict[str, Any], version: Optional[str] = None
+) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Drop IG `explore` on v26+ and say so. Returns (targeting, warning), or (None, refusal).
+
+    Never widens placements: if `explore` was the only Instagram position, Instagram is taken
+    out of publisher_platforms (an absent instagram_positions would mean every IG position).
+    If that leaves no platform at all, the write is refused.
+    """
+    if _graph_major(version or META_GRAPH_API_VERSION) < _IG_EXPLORE_REFUSED_FROM:
+        return targeting, None
+    positions = targeting.get("instagram_positions")
+    if not isinstance(positions, list) or not positions:
+        return targeting, None
+    removed = [p for p in positions if str(p).strip().lower() in _REFUSED_INSTAGRAM_POSITIONS]
+    if not removed:
+        return targeting, None
+
+    kept = [p for p in positions if str(p).strip().lower() not in _REFUSED_INSTAGRAM_POSITIONS]
+    cleaned = dict(targeting)
+    if kept:
+        cleaned["instagram_positions"] = kept
+        return cleaned, (
+            f"Removed instagram_positions {removed}: Meta no longer accepts the Instagram Explore "
+            "placement from Graph v26. Explore home (explore_home) is still allowed and was kept."
+        )
+
+    cleaned.pop("instagram_positions", None)
+    platforms = cleaned.get("publisher_platforms")
+    rest = [p for p in platforms if str(p).strip().lower() != "instagram"] if isinstance(platforms, list) else []
+    if not rest:
+        # Without a publisher_platforms list to narrow, dropping the only IG position would leave
+        # no placement fields at all, which Meta reads as automatic placements (Errata, #43 B1).
+        return None, (
+            "Instagram Explore was this ad set's only Instagram placement, and Meta no longer accepts "
+            "it from Graph v26. Nothing was changed: removing it would leave "
+            + ("no platform" if isinstance(platforms, list) else "no publisher_platforms, which Meta reads as every placement")
+            + ". Choose the placements to keep, for example instagram_positions [\"stream\"] or "
+            "[\"explore_home\"], and state publisher_platforms."
+        )
+    cleaned["publisher_platforms"] = rest
+    return cleaned, (
+        f"Removed instagram_positions {removed}: Meta no longer accepts the Instagram Explore "
+        "placement from Graph v26. It was the only Instagram position, so Instagram was taken off "
+        "this ad set's platforms rather than opened to every Instagram placement."
+    )
+
+
 def _combine_warnings(*warnings: Optional[str]) -> Optional[str]:
     parts = [w for w in warnings if w]
     if not parts:
@@ -574,6 +635,11 @@ async def create_ad_set(
     if _targeting_problem(targeting):
         return _json({"error": _TARGETING_REQUIRED})
     normalized_targeting, targeting_warning = _normalize_targeting(targeting)
+    stripped, ig_note = _strip_refused_instagram_positions(normalized_targeting)
+    if stripped is None:
+        return _json({"error": ig_note})
+    normalized_targeting = stripped
+    targeting_warning = _combine_warnings(targeting_warning, ig_note)
 
     payload: Dict[str, Any] = {
         "name": name,
@@ -845,7 +911,11 @@ async def update_ad_set(
             return _json({"error": f"After the patch, {problem}. Nothing was changed."})
         cleaned_targeting, exclusion_warning = _strip_targeting_exclusions(targeting)
         cleaned_targeting, placement_warning = _strip_deprecated_facebook_positions(cleaned_targeting)
-        update_targeting_warning = _combine_warnings(exclusion_warning, placement_warning)
+        stripped, ig_note = _strip_refused_instagram_positions(cleaned_targeting)
+        if stripped is None:
+            return _json({"error": ig_note})
+        cleaned_targeting = stripped
+        update_targeting_warning = _combine_warnings(exclusion_warning, placement_warning, ig_note)
         payload["targeting"] = json.dumps(cleaned_targeting)
         targeting_sent = cleaned_targeting
     if optimization_goal is not None:
