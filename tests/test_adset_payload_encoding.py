@@ -132,3 +132,33 @@ async def test_create_adset_rejects_missing_bid_amount_for_bid_cap():
     inner = json.loads(payload["data"]) if "data" in payload else payload
     assert "error" in inner
     assert "bid_amount is required" in inner["error"]
+
+@pytest.mark.asyncio
+async def test_video_feeds_alone_takes_facebook_off_rather_than_opening_every_fb_placement():
+    """Same rule as IG explore (ADS-41): never widen placements when stripping."""
+    with patch("armavita_meta_ads_mcp.core.adset_tools.make_api_request", new_callable=AsyncMock) as mock_api, patch(
+        "armavita_meta_ads_mcp.core.adset_tools._parent_campaign_bid_strategy", new_callable=AsyncMock, return_value=None
+    ):
+        mock_api.return_value = {"success": True, "id": "new_adset"}
+        raw = await create_ad_set(
+            ad_account_id="act_1", campaign_id="cmp_1", name="t", optimization_goal="LINK_CLICKS",
+            billing_event="IMPRESSIONS", meta_access_token="token",
+            targeting={"geo_locations": {"countries": ["US"]}, "publisher_platforms": ["facebook", "instagram"],
+                       "facebook_positions": ["video_feeds"], "instagram_positions": ["stream"]},
+        )
+    sent = json.loads(mock_api.call_args.args[2]["targeting"])
+    assert "facebook_positions" not in sent and sent["publisher_platforms"] == ["instagram"]
+    assert "only Facebook position" in json.loads(raw)["_warning"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("extra", [{}, {"publisher_platforms": ["facebook"]}])
+async def test_video_feeds_alone_with_nothing_to_narrow_is_refused(extra):
+    with patch("armavita_meta_ads_mcp.core.adset_tools.make_api_request", new_callable=AsyncMock) as mock_api:
+        raw = await update_ad_set(
+            ad_set_id="adset_1", meta_access_token="token",
+            targeting={"geo_locations": {"countries": ["US"]}, "targeting_automation": {"advantage_audience": 0},
+                       "facebook_positions": ["video_feeds"], **extra},
+        )
+    assert "Nothing was changed" in json.loads(raw)["error"]
+    mock_api.assert_not_called()

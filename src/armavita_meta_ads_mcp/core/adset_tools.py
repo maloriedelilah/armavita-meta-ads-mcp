@@ -331,7 +331,7 @@ def _strip_targeting_exclusions(targeting: Dict[str, Any]) -> tuple[Dict[str, An
     return cleaned, warning
 
 
-def _strip_deprecated_facebook_positions(targeting: Dict[str, Any]) -> tuple[Dict[str, Any], Optional[str]]:
+def _strip_deprecated_facebook_positions(targeting: Dict[str, Any]) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
     """Drop placements removed in v24.0+ (e.g. `video_feeds`) and warn.
 
     Without this Meta returns an opaque "invalid placement" error on create/update.
@@ -350,7 +350,24 @@ def _strip_deprecated_facebook_positions(targeting: Dict[str, Any]) -> tuple[Dic
     if kept:
         cleaned["facebook_positions"] = kept
     else:
+        # Dropping the only Facebook position must not widen placements: an absent
+        # facebook_positions means every Facebook position (same rule as IG explore, ADS-41).
         cleaned.pop("facebook_positions", None)
+        platforms = cleaned.get("publisher_platforms")
+        rest = [p for p in platforms if str(p).strip().lower() != "facebook"] if isinstance(platforms, list) else []
+        if not rest:
+            return None, (
+                f"facebook_positions {removed} was this ad set's only Facebook placement, and Meta retired it "
+                "(v24.0+). Nothing was changed: removing it would leave "
+                + ("no platform" if isinstance(platforms, list) else "no publisher_platforms, which Meta reads as every placement")
+                + ". Choose the placements to keep (Reels is the usual replacement: facebook_positions "
+                "[\"facebook_reels\"]) and state publisher_platforms."
+            )
+        cleaned["publisher_platforms"] = rest
+        return cleaned, (
+            f"Removed deprecated facebook_positions {removed} (v24.0+). It was the only Facebook position, so "
+            "Facebook was taken off this ad set's platforms rather than opened to every Facebook placement."
+        )
 
     warning = (
         f"Removed deprecated facebook_positions {removed} (v24.0+). "
@@ -426,14 +443,16 @@ def _combine_warnings(*warnings: Optional[str]) -> Optional[str]:
     return " | ".join(parts)
 
 
-def _normalize_targeting(targeting: Dict[str, Any]) -> tuple[Dict[str, Any], Optional[str]]:
+def _normalize_targeting(targeting: Dict[str, Any]) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
     """Normalize a (non-empty, checked) targeting spec for create_ad_set."""
     normalized = dict(targeting)
     if "targeting_automation" not in normalized:
         normalized["targeting_automation"] = {"advantage_audience": 0}
     normalized, exclusion_warning = _strip_targeting_exclusions(normalized)
-    normalized, placement_warning = _strip_deprecated_facebook_positions(normalized)
-    return normalized, _combine_warnings(exclusion_warning, placement_warning)
+    stripped, placement_warning = _strip_deprecated_facebook_positions(normalized)
+    if stripped is None:
+        return None, placement_warning
+    return stripped, _combine_warnings(exclusion_warning, placement_warning)
 
 
 _AD_SET_CLEARABLE = ("attribution_spec", "bid_constraints", "end_time", "frequency_control_specs", "value_rule_set_id")
@@ -635,6 +654,8 @@ async def create_ad_set(
     if _targeting_problem(targeting):
         return _json({"error": _TARGETING_REQUIRED})
     normalized_targeting, targeting_warning = _normalize_targeting(targeting)
+    if normalized_targeting is None:
+        return _json({"error": targeting_warning})
     stripped, ig_note = _strip_refused_instagram_positions(normalized_targeting)
     if stripped is None:
         return _json({"error": ig_note})
@@ -910,7 +931,10 @@ async def update_ad_set(
         if problem:
             return _json({"error": f"After the patch, {problem}. Nothing was changed."})
         cleaned_targeting, exclusion_warning = _strip_targeting_exclusions(targeting)
-        cleaned_targeting, placement_warning = _strip_deprecated_facebook_positions(cleaned_targeting)
+        fb_stripped, placement_warning = _strip_deprecated_facebook_positions(cleaned_targeting)
+        if fb_stripped is None:
+            return _json({"error": placement_warning})
+        cleaned_targeting = fb_stripped
         stripped, ig_note = _strip_refused_instagram_positions(cleaned_targeting)
         if stripped is None:
             return _json({"error": ig_note})
