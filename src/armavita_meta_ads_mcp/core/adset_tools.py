@@ -331,7 +331,9 @@ def _strip_targeting_exclusions(targeting: Dict[str, Any]) -> tuple[Dict[str, An
     return cleaned, warning
 
 
-def _strip_deprecated_facebook_positions(targeting: Dict[str, Any]) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
+def _strip_deprecated_facebook_positions(
+    targeting: Dict[str, Any], may_drop_platform: bool = True
+) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
     """Drop placements removed in v24.0+ (e.g. `video_feeds`) and warn.
 
     Without this Meta returns an opaque "invalid placement" error on create/update.
@@ -354,7 +356,17 @@ def _strip_deprecated_facebook_positions(targeting: Dict[str, Any]) -> tuple[Opt
         # facebook_positions means every Facebook position (same rule as IG explore, ADS-41).
         cleaned.pop("facebook_positions", None)
         platforms = cleaned.get("publisher_platforms")
+        listed = isinstance(platforms, list) and any(str(p).strip().lower() == "facebook" for p in platforms)
         rest = [p for p in platforms if str(p).strip().lower() != "facebook"] if isinstance(platforms, list) else []
+        if rest and listed and not may_drop_platform:
+            # Errata's C1 on #46: a patch that doesn't touch placements must not drop a platform.
+            return None, (
+                f"This ad set's only Facebook placement is facebook_positions {removed}, which Meta retired "
+                "(v24.0+), so it has to change before Meta will accept any targeting update. Nothing was "
+                "changed: your patch didn't touch placements, and removing Facebook is the author's call. "
+                "Send the placements in the same targeting_patch (e.g. facebook_positions [\"facebook_reels\"], "
+                "or publisher_platforms without \"facebook\")."
+            )
         if not rest:
             return None, (
                 f"facebook_positions {removed} was this ad set's only Facebook placement, and Meta retired it "
@@ -366,7 +378,8 @@ def _strip_deprecated_facebook_positions(targeting: Dict[str, Any]) -> tuple[Opt
         cleaned["publisher_platforms"] = rest
         return cleaned, (
             f"Removed deprecated facebook_positions {removed} (v24.0+). It was the only Facebook position, so "
-            "Facebook was taken off this ad set's platforms rather than opened to every Facebook placement."
+            + ("Facebook was taken off this ad set's platforms rather than opened to every Facebook placement."
+               if listed else "no Facebook placement remains (publisher_platforms didn't list Facebook).")
         )
 
     warning = (
@@ -389,7 +402,7 @@ def _graph_major(version: str) -> int:
 
 
 def _strip_refused_instagram_positions(
-    targeting: Dict[str, Any], version: Optional[str] = None
+    targeting: Dict[str, Any], version: Optional[str] = None, may_drop_platform: bool = True
 ) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
     """Drop IG `explore` on v26+ and say so. Returns (targeting, warning), or (None, refusal).
 
@@ -417,7 +430,16 @@ def _strip_refused_instagram_positions(
 
     cleaned.pop("instagram_positions", None)
     platforms = cleaned.get("publisher_platforms")
+    listed = isinstance(platforms, list) and any(str(p).strip().lower() == "instagram" for p in platforms)
     rest = [p for p in platforms if str(p).strip().lower() != "instagram"] if isinstance(platforms, list) else []
+    if rest and listed and not may_drop_platform:
+        return None, (
+            "This ad set's only Instagram placement is Explore, which Meta no longer accepts from Graph v26, "
+            "so it has to change before Meta will accept any targeting update. Nothing was changed: your "
+            "patch didn't touch placements, and removing Instagram is the author's call. Send the placements "
+            "in the same targeting_patch (e.g. instagram_positions [\"explore_home\"], or publisher_platforms "
+            "without \"instagram\")."
+        )
     if not rest:
         # Without a publisher_platforms list to narrow, dropping the only IG position would leave
         # no placement fields at all, which Meta reads as automatic placements (Errata, #43 B1).
@@ -431,8 +453,9 @@ def _strip_refused_instagram_positions(
     cleaned["publisher_platforms"] = rest
     return cleaned, (
         f"Removed instagram_positions {removed}: Meta no longer accepts the Instagram Explore "
-        "placement from Graph v26. It was the only Instagram position, so Instagram was taken off "
-        "this ad set's platforms rather than opened to every Instagram placement."
+        "placement from Graph v26. It was the only Instagram position, so "
+        + ("Instagram was taken off this ad set's platforms rather than opened to every Instagram placement."
+           if listed else "no Instagram placement remains (publisher_platforms didn't list Instagram).")
     )
 
 
@@ -591,9 +614,12 @@ async def create_ad_set(
     `targeting` accepts the standard Meta targeting spec, including
     `excluded_custom_audiences` for audience exclusions. The legacy `exclusions`
     field (detailed-targeting exclusions) is deprecated v22.0+ and stripped
-    automatically — use `excluded_custom_audiences` instead. Deprecated v24.0+
-    placements (e.g. `facebook_positions: ["video_feeds"]`) are also stripped
-    with a warning; use Reels placements instead.
+    automatically — use `excluded_custom_audiences` instead. Retired placements
+    (`facebook_positions: ["video_feeds"]` from v24.0, `instagram_positions: ["explore"]`
+    from v26.0) are removed with a `_warning`. Placements are never widened: if a retired
+    one was a platform's only position, that platform is taken out of `publisher_platforms`,
+    and if nothing would be left, or there's no `publisher_platforms` to narrow, the ad set
+    is refused and nothing is sent. Use Reels or `explore_home` instead.
 
     `placement_soft_opt_out` (Sales/Leads objectives only): object keyed by
     placement group with position lists. Up to 5% spend may flow to these
@@ -931,11 +957,14 @@ async def update_ad_set(
         if problem:
             return _json({"error": f"After the patch, {problem}. Nothing was changed."})
         cleaned_targeting, exclusion_warning = _strip_targeting_exclusions(targeting)
-        fb_stripped, placement_warning = _strip_deprecated_facebook_positions(cleaned_targeting)
+        # A patch that leaves placements alone may not drop a platform the author didn't touch (#46 C1).
+        placement_keys = ("publisher_platforms", "facebook_positions", "instagram_positions")
+        may_drop = targeting_patch is None or any(k in targeting_patch for k in placement_keys)
+        fb_stripped, placement_warning = _strip_deprecated_facebook_positions(cleaned_targeting, may_drop)
         if fb_stripped is None:
             return _json({"error": placement_warning})
         cleaned_targeting = fb_stripped
-        stripped, ig_note = _strip_refused_instagram_positions(cleaned_targeting)
+        stripped, ig_note = _strip_refused_instagram_positions(cleaned_targeting, may_drop_platform=may_drop)
         if stripped is None:
             return _json({"error": ig_note})
         cleaned_targeting = stripped

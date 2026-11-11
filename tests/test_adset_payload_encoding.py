@@ -162,3 +162,49 @@ async def test_video_feeds_alone_with_nothing_to_narrow_is_refused(extra):
         )
     assert "Nothing was changed" in json.loads(raw)["error"]
     mock_api.assert_not_called()
+
+
+async def _patch_legacy(current_targeting, tpatch):
+    current = {"targeting": {"geo_locations": {"countries": ["US"]}, "targeting_automation": {"advantage_audience": 0},
+                             **current_targeting}}
+
+    async def api(endpoint, token, params=None, method="GET"):
+        return current if method == "GET" else {"success": True, "id": "adset_1"}
+
+    with patch("armavita_meta_ads_mcp.core.adset_tools.make_api_request", side_effect=api) as mock, patch(
+        "armavita_meta_ads_mcp.core.adset_tools.META_GRAPH_API_VERSION", "v27.0"
+    ):
+        raw = await update_ad_set(ad_set_id="adset_1", meta_access_token="token", targeting_patch=tpatch)
+    posts = [c for c in mock.call_args_list if len(c.args) > 3 and c.args[3] == "POST" or c.kwargs.get("method") == "POST"]
+    return json.loads(raw), posts
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy", [
+    {"publisher_platforms": ["facebook", "instagram"], "facebook_positions": ["video_feeds"], "instagram_positions": ["stream"]},
+    {"publisher_platforms": ["facebook", "instagram"], "facebook_positions": ["feed"], "instagram_positions": ["explore"]},
+])
+async def test_an_unrelated_patch_never_drops_a_platform(legacy):
+    """Errata's C1 on #46: age_min must not take Facebook or Instagram off the ad set."""
+    payload, posts = await _patch_legacy(legacy, {"age_min": 25})
+    assert "Nothing was changed" in payload["error"] and "author's call" in payload["error"]
+    assert not posts
+
+
+@pytest.mark.asyncio
+async def test_a_patch_that_names_the_placements_may_narrow():
+    legacy = {"publisher_platforms": ["facebook", "instagram"], "facebook_positions": ["video_feeds"], "instagram_positions": ["stream"]}
+    payload, posts = await _patch_legacy(legacy, {"publisher_platforms": ["facebook", "instagram"], "age_min": 25})
+    assert posts
+    sent = json.loads(posts[-1].args[2]["targeting"])
+    assert sent["publisher_platforms"] == ["instagram"] and "facebook_positions" not in sent
+
+
+def test_the_warning_only_says_facebook_was_taken_off_when_it_was_listed():
+    """Errata's C2 on #46."""
+    from armavita_meta_ads_mcp.core.adset_tools import _strip_deprecated_facebook_positions
+    _, listed = _strip_deprecated_facebook_positions(
+        {"publisher_platforms": ["facebook", "instagram"], "facebook_positions": ["video_feeds"]})
+    _, unlisted = _strip_deprecated_facebook_positions(
+        {"publisher_platforms": ["instagram"], "facebook_positions": ["video_feeds"]})
+    assert "taken off" in listed and "taken off" not in unlisted
