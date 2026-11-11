@@ -591,6 +591,8 @@ async def read_ad_creative(ad_creative_id: str, meta_access_token: Optional[str]
     """Read an ad creative's full spec, including its dynamic_creative_spec and
     degrees_of_freedom_spec when present. Product showcase is
     `degrees_of_freedom_spec.creative_features_spec.product_extensions.enroll_status`.
+    `degrees_of_freedom_read` is "ok" when Meta answered (a missing spec then means none is
+    stored) or "unavailable" when it couldn't be read: treat that as not confirmed.
 
     The reply always has `self_ai_disclosure`: "OPT_IN" or "OPT_OUT" as Meta stored it, or
     null when none is stored. Use it to confirm a disclosure sent with create_ad_creative was
@@ -612,12 +614,18 @@ async def read_ad_creative(ad_creative_id: str, meta_access_token: Optional[str]
             pass
         # Also on its own: where product showcase (product_extensions) and other creative
         # features are stored, so the v27 opt-out can be read back (ADS-158).
+        # degrees_of_freedom_read says whether Meta answered, so a failed read is never
+        # mistaken for "nothing stored" by an opt-out check.
+        dof_read = "unavailable"
         try:
             dof_payload = await make_api_request(ad_creative_id, meta_access_token, {"fields": "degrees_of_freedom_spec"})
-            if isinstance(dof_payload, dict) and "degrees_of_freedom_spec" in dof_payload:
-                payload["degrees_of_freedom_spec"] = dof_payload["degrees_of_freedom_spec"]
+            if isinstance(dof_payload, dict) and "error" not in dof_payload:
+                dof_read = "ok"
+                if "degrees_of_freedom_spec" in dof_payload:
+                    payload["degrees_of_freedom_spec"] = dof_payload["degrees_of_freedom_spec"]
         except Exception:  # noqa: BLE001
             pass
+        payload["degrees_of_freedom_read"] = dof_read
         # Asked for on its own, so a Graph version without the field can't break the read (ADS-128).
         disclosure, read = None, "unavailable"
         try:

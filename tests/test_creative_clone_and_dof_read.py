@@ -46,10 +46,18 @@ async def _read(dof_reply):
 async def test_read_ad_creative_returns_the_product_showcase_setting():
     spec = {"creative_features_spec": {"product_extensions": {"enroll_status": "OPT_OUT"}}}
     payload = await _read({"id": "111", "degrees_of_freedom_spec": spec})
-    assert payload["degrees_of_freedom_spec"] == spec
+    assert payload["degrees_of_freedom_spec"] == spec and payload["degrees_of_freedom_read"] == "ok"
 
 
 @pytest.mark.asyncio
 async def test_a_failed_degrees_of_freedom_read_does_not_break_the_read():
     payload = await _read(RuntimeError("field unknown on this version"))
     assert payload["name"] == "c" and "degrees_of_freedom_spec" not in payload
+    assert payload["degrees_of_freedom_read"] == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_an_error_reply_is_unavailable_and_nothing_stored_is_ok():
+    assert (await _read({"error": {"message": "nope"}}))["degrees_of_freedom_read"] == "unavailable"
+    nothing = await _read({"id": "111"})
+    assert nothing["degrees_of_freedom_read"] == "ok" and "degrees_of_freedom_spec" not in nothing
