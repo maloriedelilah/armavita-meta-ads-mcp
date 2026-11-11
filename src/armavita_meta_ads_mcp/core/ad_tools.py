@@ -588,7 +588,9 @@ async def list_ad_previews(
 @mcp_server.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
 @meta_api_tool
 async def read_ad_creative(ad_creative_id: str, meta_access_token: Optional[str] = None) -> str:
-    """Read an ad creative's full spec, including its dynamic_creative_spec when present.
+    """Read an ad creative's full spec, including its dynamic_creative_spec and
+    degrees_of_freedom_spec when present. Product showcase is
+    `degrees_of_freedom_spec.creative_features_spec.product_extensions.enroll_status`.
 
     The reply always has `self_ai_disclosure`: "OPT_IN" or "OPT_OUT" as Meta stored it, or
     null when none is stored. Use it to confirm a disclosure sent with create_ad_creative was
@@ -606,6 +608,14 @@ async def read_ad_creative(ad_creative_id: str, meta_access_token: Optional[str]
             dynamic_payload = await make_api_request(ad_creative_id, meta_access_token, {"fields": "dynamic_creative_spec"})
             if isinstance(dynamic_payload, dict) and "dynamic_creative_spec" in dynamic_payload:
                 payload["dynamic_creative_spec"] = dynamic_payload["dynamic_creative_spec"]
+        except Exception:  # noqa: BLE001
+            pass
+        # Also on its own: where product showcase (product_extensions) and other creative
+        # features are stored, so the v27 opt-out can be read back (ADS-158).
+        try:
+            dof_payload = await make_api_request(ad_creative_id, meta_access_token, {"fields": "degrees_of_freedom_spec"})
+            if isinstance(dof_payload, dict) and "degrees_of_freedom_spec" in dof_payload:
+                payload["degrees_of_freedom_spec"] = dof_payload["degrees_of_freedom_spec"]
         except Exception:  # noqa: BLE001
             pass
         # Asked for on its own, so a Graph version without the field can't break the read (ADS-128).

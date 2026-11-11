@@ -367,19 +367,28 @@ async def clone_ad_creative(
     meta_access_token: Optional[str] = None,
     name_suffix: Optional[str] = " - Copy",
 ) -> str:
-    """Duplicate a creative with Meta's copy edge.
+    """Refuses: Meta has no copy call for ad creatives, so nothing is sent (ADS-158).
 
-    The copy has the same text, headline, call to action and link. Creatives can't be edited
-    in place on Meta for most fields: to change content, make a new creative with
-    create_ad_creative instead.
+    Meta's `/copies` edge exists for campaigns, ad sets and ads only; on a creative Graph
+    answers code 100, subcode 33. To copy a creative, read it with read_ad_creative and make
+    a new one with create_ad_creative from the same Page, image or video, text, link and
+    url_tags. That path also applies the product-showcase opt-out and the AI-disclosure
+    rules. To copy an ad together with its creative, use clone_ad.
     """
-    return await _forward_duplication_request(
-        "creative",
-        ad_creative_id,
-        meta_access_token,
+    return json.dumps(
         {
-            "name_suffix": name_suffix,
+            "success": False,
+            "error": "unsupported_by_meta",
+            "message": (
+                f"Did: nothing. Creative {ad_creative_id} was not copied and no request was sent. "
+                "Expected: a copy call for creatives. Got: Meta has none; its copy call covers "
+                "campaigns, ad sets and ads only. Next: read_ad_creative, then create_ad_creative "
+                "with the same Page, image or video, text, link and url_tags; or clone_ad to copy "
+                "the ad with its creative."
+            ),
+            "details": {"resource_type": "creative", "resource_id": ad_creative_id},
         },
+        indent=2,
     )
 
 
