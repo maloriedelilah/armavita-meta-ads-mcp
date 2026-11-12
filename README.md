@@ -202,7 +202,7 @@ Beyond the core auth variables above, the server reads four optional knobs:
 - `list_product_catalogs`, `list_product_sets`, `list_products`, `upsert_product`, `batch_products`
 
 ### Duplication
-- `clone_campaign`, `clone_ad_set`, `clone_ad`, `clone_ad_creative`
+- `clone_campaign`, `clone_ad_set`, `clone_ad`, `clone_ad_creative` (refuses: Meta has no copy call for creatives; use `create_ad_creative`)
 
 ### Ads Library & research helpers
 - `search_ads_archive`
