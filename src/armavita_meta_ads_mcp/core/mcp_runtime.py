@@ -5,6 +5,7 @@
 
 import argparse
 import inspect
+import json
 import logging
 import os
 import sys
@@ -102,6 +103,25 @@ mcp_server = _ArmavitaFastMCP("meta-ads")
 # include access_token query parameters.
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+
+def install_source() -> str:
+    """Where this copy came from, for --version (ADS-207). A `uv tool install` or `pip install`
+    from GitHub records the commit in the package's direct_url.json (PEP 610), so a version
+    number that hasn't moved can't hide which code is running. "" when there's nothing to say."""
+    try:
+        from importlib.metadata import distribution
+
+        raw = distribution("armavita-meta-ads-mcp").read_text("direct_url.json")
+        info = json.loads(raw) if raw else {}
+    except Exception:
+        return ""
+    commit = str((info.get("vcs_info") or {}).get("commit_id") or "")
+    if len(commit) >= 7 and all(c in "0123456789abcdef" for c in commit.lower()):
+        return f"git {commit[:7]}"
+    if (info.get("dir_info") or {}).get("editable"):
+        return "editable source checkout"
+    return ""
 
 
 def login_cli() -> None:
@@ -280,7 +300,8 @@ def main() -> int:
     if args.version:
         from armavita_meta_ads_mcp import __version__
 
-        print(f"Armavita Meta Ads MCP v{__version__}")
+        source = install_source()
+        print(f"Armavita Meta Ads MCP v{__version__}" + (f" ({source})" if source else ""))
         return 0
 
     if args.transport == "streamable-http" and not args.login:

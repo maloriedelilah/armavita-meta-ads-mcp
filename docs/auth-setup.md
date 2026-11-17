@@ -23,19 +23,61 @@ Notes:
 
 Prerequisites:
 
-1. a Meta app with valid Ads permissions
-2. `META_APP_ID` and `META_APP_SECRET`
-3. localhost callback availability
+1. A Meta app with valid Ads permissions, **in Development mode**. A Live (published) app
+   accepts only HTTPS redirect URIs, so it refuses `http://localhost` and `--login` can't
+   use it, even when the app is approved and the URI is on every list (Malorie, Nov 17).
+   Keep a separate development app for local logins. You, as its admin or developer, can
+   sign in to it without review.
+2. `META_APP_ID` and `META_APP_SECRET` for that app.
+3. The app set up for a localhost callback, in the Meta developer dashboard:
+   - **App settings → Basic → App Domains:** `localhost`. Without it, Facebook shows
+     "Can't load URL: The domain of this URL isn't included in the app's domains".
+   - **App settings → Basic → Add platform → Website**, with Site URL `http://localhost:8080/`.
+   - **Facebook Login → Settings → Valid OAuth Redirect URIs:** `http://localhost:8080/callback`.
+     If 8080 is busy, `--login` uses 8081–8089 instead. The terminal prints the URL it
+     opens, so check `redirect_uri` there and add that port too.
+   - **App settings → Advanced:** "Native or desktop app" **on**, and "Is app secret
+     embedded in the client" **off**. With the second on, Facebook refuses the code exchange
+     with Graph error 1 (Oct 31).
 
-Run:
+Run, on Linux or macOS:
 
 ```bash
 export META_APP_ID="..."
-export META_APP_SECRET="..."
+read -rs META_APP_SECRET; export META_APP_SECRET   # silent prompt: paste, then Enter
 armavita-meta-ads-mcp --login
 ```
 
-The login command opens a browser and stores token cache locally after successful auth.
+On Windows (PowerShell):
+
+```powershell
+$env:META_APP_ID = "..."
+$s = Read-Host "App secret" -AsSecureString
+$env:META_APP_SECRET = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($s))
+armavita-meta-ads-mcp --login
+```
+
+The login command opens a browser, and after Facebook signs you in it lands on an
+"Authorization complete" page and stores the token cache locally. With no app ID or secret
+set, it stops with a message instead of opening the browser.
+
+### Check which copy you're running
+
+An old install can sit ahead of a new one on your PATH. That's common on Windows after
+moving from `pip install --user` to `uv tool install`, and the old copy then behaves as
+if fixes never shipped. Check:
+
+```powershell
+Get-Command armavita-meta-ads-mcp -All | Select-Object Source   # Windows
+armavita-meta-ads-mcp --version                                  # prints the git commit too
+```
+
+```bash
+which -a armavita-meta-ads-mcp                                   # Linux / macOS
+```
+
+If more than one turns up, remove the pip copy (`py -3.12 -m pip uninstall -y
+armavita-meta-ads-mcp`, or `pip uninstall` on Linux) and keep the uv one.
 
 ## Token Cache Location
 
@@ -59,6 +101,16 @@ Cached token file is stored per OS:
 `Authorization code exchange failed`:
 
 - verify app secret, redirect URI, and permission approval status
+- "Is app secret embedded in the client" must be off (App settings → Advanced)
+
+`Can't load URL` (Facebook's page, before any login):
+
+- add `localhost` to App Domains and a Website platform with Site URL `http://localhost:8080/`
+- a Live app can't use a localhost redirect at all: use a Development-mode app
+
+`Invalid App ID` (Facebook's page):
+
+- you're running a copy from before ADS-83, or META_APP_ID names an app that doesn't exist; see "Check which copy you're running" above
 
 `Invalid OAuth access token` / Meta error `code: 190`:
 

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 2.0.0 — 2026-11-17
+
+The first version number since 1.2.0 (July): everything below shipped on main between then and now, so `1.2.0` no longer told anyone what was installed. A major bump because tools were removed and empty values changed meaning. `--version` now also prints the git commit the package was installed from (ADS-207).
+
 ### Changed
 
 - **Empty values mean "not given" (ADS-61, ADS-96).** Some clients fill every unused field with `""`, `[]` or `{}`, and Graph took those as real values: a budget edit could also clear frequency caps, the attribution window, bid constraints or the value rule set. Now an empty value in an optional argument is dropped, on every tool.

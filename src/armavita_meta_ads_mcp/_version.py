@@ -5,7 +5,8 @@
 
 Kept as a dependency-free leaf module so it can be imported from anywhere
 (package __init__, media_helpers, graph_client) without import cycles. Keep
-this in sync with the `version` field in pyproject.toml on each release.
+this in sync with the `version` field in pyproject.toml on each release
+(tests/test_package_runtime.py fails if they, the README or CHANGELOG disagree).
 """
 
-__version__ = "1.2.0"
+__version__ = "2.0.0"
