@@ -14,7 +14,7 @@ from armavita_meta_ads_mcp.core import mcp_runtime
 
 
 def test_package_exports():
-    assert armavita_meta_ads_mcp.__version__ == "1.2.0"
+    assert armavita_meta_ads_mcp.__version__ == "2.0.0"
     assert callable(armavita_meta_ads_mcp.entrypoint)
 
 
@@ -79,4 +79,39 @@ def test_runtime_version_flag(capsys):
 
     captured = capsys.readouterr()
     assert exit_code == 0
-    assert "Armavita Meta Ads MCP v1.2.0" in captured.out
+    assert "Armavita Meta Ads MCP v2.0.0" in captured.out
+
+
+def test_the_version_agrees_everywhere():
+    """ADS-205: 1.2.0 sat unchanged for months. pyproject, _version, the README's contract
+    version and a CHANGELOG heading must name the same version."""
+    import tomllib
+
+    root = Path(__file__).resolve().parents[1]
+    version = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]
+    assert armavita_meta_ads_mcp.__version__ == version
+    assert f"Current contract version: `{version}`" in (root / "README.md").read_text()
+    assert f"\n## {version} " in (root / "CHANGELOG.md").read_text()
+
+
+@pytest.mark.parametrize("direct_url, shown", [
+    ('{"url": "https://github.com/x/armavita-meta-ads-mcp", "vcs_info": {"vcs": "git", "commit_id": "d406929f00ba1"}}',
+     "git d406929"),
+    ('{"url": "file:///src", "dir_info": {"editable": true}}', "editable source checkout"),
+    ('{"url": "https://example.invalid/x.whl", "archive_info": {}}', ""),
+    ('{"vcs_info": {"commit_id": "<script>"}}', ""),
+    (None, ""),
+    ("not json", ""),
+])
+def test_version_shows_the_commit_it_was_installed_from(capsys, direct_url, shown):
+    class Dist:
+        def read_text(self, name):
+            assert name == "direct_url.json"
+            return direct_url
+
+    with patch("importlib.metadata.distribution", return_value=Dist()), \
+            patch.object(sys, "argv", ["armavita-meta-ads-mcp", "--version"]):
+        assert mcp_runtime.main() == 0
+    out = capsys.readouterr().out.strip()
+    assert out == "Armavita Meta Ads MCP v2.0.0" + (f" ({shown})" if shown else "")
+
