@@ -106,7 +106,7 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 def install_source() -> str:
-    """Where this copy came from, for --version (ADS-205). A `uv tool install` or `pip install`
+    """Where this copy came from, for --version (ADS-207). A `uv tool install` or `pip install`
     from GitHub records the commit in the package's direct_url.json (PEP 610), so a version
     number that hasn't moved can't hide which code is running. "" when there's nothing to say."""
     try:

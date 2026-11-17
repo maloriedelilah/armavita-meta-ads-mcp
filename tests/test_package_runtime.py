@@ -83,7 +83,7 @@ def test_runtime_version_flag(capsys):
 
 
 def test_the_version_agrees_everywhere():
-    """ADS-205: 1.2.0 sat unchanged for months. pyproject, _version, the README's contract
+    """ADS-207: 1.2.0 sat unchanged for months. pyproject, _version, the README's contract
     version and a CHANGELOG heading must name the same version."""
     import tomllib
 
