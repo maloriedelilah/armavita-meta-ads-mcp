@@ -36,8 +36,21 @@ _CREATIVE_FIELDS = (
     "id,name,status,thumbnail_url,image_url,image_hash,object_story_spec,"
     "asset_feed_spec,image_urls_for_viewing,url_tags,link_url"
 )
-# Graph's AdCreative self_ai_disclosure values (ADS-107).
-_AI_DISCLOSURE_VALUES = {"OPT_IN", "OPT_OUT"}
+# Graph's AdCreative self_ai_disclosure (ADS-107). Meta accepts OPT_IN through the API with no
+# error and then drops it: on Nov 20 three OPT_IN creatives (this server, and Graph Explorer
+# straight to Graph) left Ads Manager's AI box off, while Meta's own connector set it. The
+# field also reads back blank for every creative. So OPT_IN is refused (ADS-213).
+_AI_DISCLOSURE_REFUSED = (
+    "Meta drops self_ai_disclosure \"OPT_IN\" when it comes through the API: the creative "
+    "would be made with the AI box off. Make this creative through Meta's own connector, or "
+    "build it without OPT_IN and have the author tick the AI box on the ad in Ads Manager. "
+    "Nothing was created."
+)
+_AI_DISCLOSURE_NOTE = (
+    "Meta doesn't report the AI disclosure through the API: self_ai_disclosure reads blank for "
+    "every creative, whatever was sent and whichever tool made it. Blank is not \"off\" and "
+    "not a failed declaration. The AI box on the ad in Ads Manager is the only place to see it."
+)
 _PAGE_FIELDS = "id,name,username,category,fan_count,link,verification_status,picture"
 _PREVIEW_FALLBACK_AD_FORMATS = (
     "DESKTOP_FEED_STANDARD",
@@ -594,11 +607,10 @@ async def read_ad_creative(ad_creative_id: str, meta_access_token: Optional[str]
     `degrees_of_freedom_read` is "ok" when Meta answered (a missing spec then means none is
     stored) or "unavailable" when it couldn't be read: treat that as not confirmed.
 
-    The reply always has `self_ai_disclosure`: "OPT_IN" or "OPT_OUT" as Meta stored it, or
-    null when none is stored. Use it to confirm a disclosure sent with create_ad_creative was
-    kept (the create reply's `self_ai_disclosure_sent` is only an echo of what was sent). If
-    Meta couldn't be asked for it, `self_ai_disclosure_read` is "unavailable" and the value
-    is null: treat that as not confirmed, never as OPT_OUT.
+    The AI disclosure isn't in the reply. Meta returns `self_ai_disclosure` blank for every
+    creative, whatever was sent and whichever tool made it, so it can never confirm or
+    refute a declaration. The reply's `ai_disclosure_note` says so in plain words. The only
+    place to see whether an ad is declared as AI is the AI box on the ad in Ads Manager.
     """
     if not ad_creative_id:
         return _json({"error": "No creative ID provided"})
@@ -626,18 +638,9 @@ async def read_ad_creative(ad_creative_id: str, meta_access_token: Optional[str]
         except Exception:  # noqa: BLE001
             pass
         payload["degrees_of_freedom_read"] = dof_read
-        # Asked for on its own, so a Graph version without the field can't break the read (ADS-128).
-        disclosure, read = None, "unavailable"
-        try:
-            reply = await make_api_request(ad_creative_id, meta_access_token, {"fields": "self_ai_disclosure"})
-            if isinstance(reply, dict) and "error" not in reply:
-                value = reply.get("self_ai_disclosure")
-                disclosure = value if value in _AI_DISCLOSURE_VALUES else None
-                read = "ok"
-        except Exception:  # noqa: BLE001
-            pass
-        payload["self_ai_disclosure"] = disclosure
-        payload["self_ai_disclosure_read"] = read
+        # No self_ai_disclosure read-back: it's blank for every creative, so a value here could
+        # only be misread as "off" or as a declaration that failed (ADS-213; ADS-128 added it).
+        payload["ai_disclosure_note"] = _AI_DISCLOSURE_NOTE
 
     return _json(payload)
 
@@ -1398,13 +1401,15 @@ async def create_ad_creative(
     """Create an ad creative.
 
     AI disclosure:
-      * `self_ai_disclosure` — "OPT_IN" declares that the creative's media was made or
-        edited with a generative AI tool; "OPT_OUT" declares it wasn't. Meta may then
-        show an "AI info" label where the law requires one (currently the European
-        region, India, Taiwan, California and New York). It can only be set here, when
-        the creative is made: no update can change it afterwards. Disclosure is the
-        advertiser's decision: ask them, and never set or guess it on their behalf.
-        Left out, nothing is declared. The reply's `self_ai_disclosure_sent` echoes it.
+      * `self_ai_disclosure` — this server can't declare AI-made media. Meta accepts
+        "OPT_IN" through the API without an error and then drops it, so the ad would run
+        with the AI box off. "OPT_IN" is therefore refused before anything is created. To
+        declare an ad as AI, make the creative through Meta's own connector, or build it
+        here without OPT_IN and have the author tick the AI box on the ad in Ads Manager.
+        Whether to declare is the advertiser's decision: ask them, and never guess.
+        "OPT_OUT" is accepted and sent, but it changes nothing: leaving the field out
+        declares nothing too. The reply's `self_ai_disclosure_sent` echoes what was sent.
+        No tool can read the disclosure back (see read_ad_creative).
 
     Identity fields:
       * `facebook_page_id` — the Page the ad runs under. Give it. If it's left out it is
@@ -1440,11 +1445,13 @@ async def create_ad_creative(
     disclosure = None
     if self_ai_disclosure is not None:
         disclosure = str(self_ai_disclosure).strip().upper()
-        if disclosure not in _AI_DISCLOSURE_VALUES:
+        if disclosure == "OPT_IN":
+            return _json({"error": _AI_DISCLOSURE_REFUSED, "provided": self_ai_disclosure})
+        if disclosure != "OPT_OUT":
             return _json({
                 "error": (
-                    'self_ai_disclosure must be "OPT_IN" (the media was made or edited with generative AI) '
-                    'or "OPT_OUT" (it wasn\'t), or left out. Nothing was created.'
+                    'self_ai_disclosure can only be "OPT_OUT" (which changes nothing) or left out. '
+                    "Nothing was created."
                 ),
                 "provided": self_ai_disclosure,
             })
@@ -1666,8 +1673,10 @@ async def update_ad_creative(
 
     Meta treats creative *content* (text/image/link) as immutable after creation;
     this tool rejects content-field edits and surfaces Meta's immutability error.
-    The AI disclosure (`self_ai_disclosure`) is set only by create_ad_creative and can't
-    be changed here: make a new creative to change it.
+    The AI disclosure (`self_ai_disclosure`) can't be set or changed here, and this server
+    can't declare AI media at all: Meta drops "OPT_IN" sent through the API. To declare an
+    ad as AI, make the creative through Meta's own connector, or have the author tick the
+    AI box on the ad in Ads Manager.
     Use it for name, optimization_type, dynamic_creative_spec, and related specs.
     """
     if not ad_creative_id:

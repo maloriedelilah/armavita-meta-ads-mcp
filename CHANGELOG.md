@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 2.1.0 — 2026-11-20
+
+### Changed
+
+- **`create_ad_creative` refuses `self_ai_disclosure: "OPT_IN"` (ADS-213).**
+  - **Why:** Meta accepts it through the API with no error, then drops it. On Nov 20, three OPT_IN test creatives (two from this server's tools, one from Graph Explorer straight to Graph) all showed Ads Manager's AI box off. A creative made through Meta's own connector showed it on.
+  - **What happens now:** the call is refused before anything reaches Meta. The reply points to Meta's own connector, or to having the author tick the AI box on the ad in Ads Manager.
+  - `"OPT_OUT"` is still accepted and sent, but it changes nothing.
+- **`read_ad_creative` no longer returns `self_ai_disclosure` or `self_ai_disclosure_read`, and no longer asks Graph for the field.**
+  - **Why:** it reads back blank for every creative, whatever was sent and whichever tool made it. A blank was misread as "off", or as a declaration that failed.
+  - **What replaces them:** an `ai_disclosure_note` that says this in plain words.
+- `update_ad_creative`'s description now says the same.
+
 ## 2.0.0 — 2026-11-17
 
 The first version number since 1.2.0 (July): everything below shipped on main between then and now, so `1.2.0` no longer told anyone what was installed. A major bump because tools were removed and empty values changed meaning. `--version` now also prints the git commit the package was installed from (ADS-207).
