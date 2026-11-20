@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Changed
+
+- **The `--login` browser pages say what happened in plain words (ADS-220, standards:page-text).**
+  - Success is "Connected to Meta", and says how long the token lasts.
+  - A failure is "Not connected", with the reason and the command to run again.
+  - A stray reply is "Nothing changed".
+  - Jargon ("a CSRF check") and error codes no longer appear on the page. The terminal still prints the error code.
+
 ## 2.1.0 — 2026-11-20
 
 ### Changed
