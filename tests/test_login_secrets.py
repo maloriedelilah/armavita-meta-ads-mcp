@@ -169,7 +169,7 @@ def test_error_callback_without_this_logins_state_is_ignored(monkeypatch):
 
     shutdown.assert_not_called()
     assert oauth_callback_server.token_container.get("error") is None
-    assert "Ignored" in responses[0]
+    assert "Nothing changed" in responses[0]
 
 
 def test_error_callback_with_this_logins_state_ends_the_login(monkeypatch):

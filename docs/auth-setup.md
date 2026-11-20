@@ -57,8 +57,8 @@ $env:META_APP_SECRET = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runti
 armavita-meta-ads-mcp --login
 ```
 
-The login command opens a browser, and after Facebook signs you in it lands on an
-"Authorization complete" page and stores the token cache locally. With no app ID or secret
+The login command opens a browser, and after Facebook signs you in it lands on a
+"Connected to Meta" page and stores the token cache locally. With no app ID or secret
 set, it stops with a message instead of opening the browser.
 
 ### Check which copy you're running
