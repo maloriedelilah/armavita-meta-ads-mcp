@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## 2.1.1 — 2026-11-23
+
+### Security
+
+- **Dependencies refreshed (ADS-229, Errata's weekly review).** The image installs exactly `uv.lock`. The lock was months behind: pip-audit found 159 advisories in 15 packages, and none now.
+  - `mcp[cli]` was hard-pinned at 1.27.2. It's now `>=1.30,<2`, which locks 1.30.0.
+  - Notable moves:
+    - Pillow 12.1.1 → 13.0.0, fixing GIF, APNG and EXIF decoder DoS reachable through `open_image`;
+    - starlette 0.52.1 → 1.10.0;
+    - python-multipart 0.0.22 → 0.0.34;
+    - PyJWT 2.11.0 → 2.15.1;
+    - cryptography 46.0.5 → 50.0.2;
+    - urllib3 2.6.3 → 2.8.0;
+    - requests 2.32.5 → 2.34.2;
+    - uvicorn 0.41.0 → 0.54.0.
+  - No tool behaviour changes.
+
 ### Changed
 
 - **The `--login` browser pages say what happened in plain words (ADS-220, standards:page-text).**
