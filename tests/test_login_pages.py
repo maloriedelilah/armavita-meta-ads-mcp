@@ -38,8 +38,8 @@ def test_success_page_is_titled_centered_and_explains(callback, monkeypatch):
     monkeypatch.setattr(auth_state, "complete_oauth_from_auth_code", lambda *a, **k: {"success": True, "token_info": Info()})
     page = callback(f"code=abc&state={STATE}")
     assert "Facebook API Ads MCP Connector" in page
-    assert "<h1>Authorization complete</h1>" in page
-    assert "saved your Meta access token" in page and "You can close this window." in page
+    assert "<h1>Connected to Meta</h1>" in page
+    assert "Your Meta access token is saved on this computer" in page and "You can close this window." in page
     assert "text-align:center" in page and "sans-serif" in page
     assert "<script" not in page
     assert "EAAB_TOKEN_SENTINEL" not in page
@@ -47,7 +47,7 @@ def test_success_page_is_titled_centered_and_explains(callback, monkeypatch):
 
 def test_failure_pages_say_nothing_was_saved_and_escape_what_facebook_sent(callback):
     page = callback(f"error=access_denied&error_description={quote('<img src=x onerror=alert(1)>')}&state={STATE}")
-    assert "<h1>Authorization failed</h1>" in page and "Nothing was saved" in page
+    assert "<h1>Not connected</h1>" in page and "Nothing was saved" in page
     assert "<img" not in page and "&lt;img" in page
     assert "You can close this window." in page
 
@@ -55,12 +55,12 @@ def test_failure_pages_say_nothing_was_saved_and_escape_what_facebook_sent(callb
 @pytest.mark.parametrize("query", ["state=" + STATE, "code=abc&state=WRONG"])
 def test_missing_code_and_state_mismatch_get_the_styled_failure_page(callback, query):
     page = callback(query)
-    assert "Facebook API Ads MCP Connector" in page and "<h1>Authorization failed</h1>" in page
+    assert "Facebook API Ads MCP Connector" in page and "<h1>Not connected</h1>" in page
 
 
 def test_a_stray_error_callback_is_ignored(callback):
     page = callback("error=access_denied&state=WRONG")
-    assert "<h1>Ignored</h1>" in page and "nothing changed" in page
+    assert "<h1>Nothing changed</h1>" in page and "older sign-in" in page
 
 
 def test_render_page_escapes_every_string():
@@ -87,3 +87,17 @@ def test_pages_are_served_with_no_store_and_a_script_free_csp(monkeypatch):
     csp = r.getheader("Content-Security-Policy")
     assert "default-src 'none'" in csp and "script-src" not in csp and "frame-ancestors 'none'" in csp
     assert r.getheader("X-Frame-Options") == "DENY"
+
+
+def test_a_failed_token_exchange_keeps_the_error_code_off_the_page(callback, monkeypatch):
+    """ADS-220 (standards:page-text): plain words on the page; the code is printed in the terminal."""
+    monkeypatch.setattr(auth_state, "complete_oauth_from_auth_code", lambda *a, **k: {"success": False, "error": "oauth_completion_failed"})
+    page = callback(f"code=abc&state={STATE}")
+    assert "<h1>Not connected</h1>" in page and "The details are in your terminal." in page
+    assert "oauth_completion_failed" not in page
+    assert ocs.token_container["error"] == "oauth_completion_failed"  # what the terminal prints
+
+
+def test_a_state_mismatch_is_explained_without_jargon(callback):
+    page = callback("code=abc&state=WRONG")
+    assert "didn&#x27;t come from the sign-in you started" in page and "CSRF" not in page

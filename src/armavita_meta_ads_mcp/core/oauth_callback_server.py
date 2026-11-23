@@ -103,12 +103,13 @@ def render_page(heading: str, paragraphs: list, tone: str = "ok", show_close: bo
     return "".join(parts)
 
 
+# Page text follows standards:page-text (ADS-220): what happened and what to do next, in plain
+# words. Error codes go to the terminal (auth_state prints them), never the page.
+RETRY = "Nothing was saved. Go back to your terminal and run armavita-meta-ads-mcp --login again."
+
+
 def _failed_page(reason: str) -> str:
-    return render_page(
-        "Authorization failed",
-        [reason, "Nothing was saved. Go back to your terminal and run --login again."],
-        tone="bad",
-    )
+    return render_page("Not connected", [reason, RETRY], tone="bad")
 
 
 class CallbackHandler(BaseHTTPRequestHandler):
@@ -157,8 +158,8 @@ class CallbackHandler(BaseHTTPRequestHandler):
             if not _state_is_valid(state, token_container.get("expected_state")):
                 self._html_response(
                     render_page(
-                        "Ignored",
-                        ["This page doesn't belong to the login in progress, so nothing changed."],
+                        "Nothing changed",
+                        ["This page belongs to an older sign-in, not the one in progress, so it was ignored."],
                         tone="neutral",
                     )
                 )
@@ -172,7 +173,7 @@ class CallbackHandler(BaseHTTPRequestHandler):
                     "timestamp": time.time(),
                 }
             )
-            self._html_response(_failed_page(f"Facebook said: {primary_text}"))
+            self._html_response(_failed_page(f"Facebook stopped the sign-in: {primary_text}"))
             _shutdown_async()
             return
 
@@ -184,7 +185,7 @@ class CallbackHandler(BaseHTTPRequestHandler):
                     "timestamp": time.time(),
                 }
             )
-            self._html_response(_failed_page("Facebook didn't send back an authorization code."))
+            self._html_response(_failed_page("Facebook sent you back without finishing the sign-in."))
             _shutdown_async()
             return
 
@@ -202,7 +203,7 @@ class CallbackHandler(BaseHTTPRequestHandler):
                 }
             )
             self._html_response(
-                _failed_page("This reply didn't match the login that was started, so it was refused (a CSRF check).")
+                _failed_page("This reply didn't come from the sign-in you started, so it was refused to keep your account safe.")
             )
             _shutdown_async()
             return
@@ -239,12 +240,12 @@ class CallbackHandler(BaseHTTPRequestHandler):
                 )
                 self._html_response(
                     render_page(
-                        "Authorization complete",
+                        "Connected to Meta",
                         [
-                            "Facebook signed you in, and the connector saved your Meta access token on this "
-                            "computer, in a file only your user account can read.",
-                            "Your AI app can now use the Meta Ads tools with your ad accounts. When the token "
-                            "expires, run --login again to get a new one.",
+                            "Your Meta access token is saved on this computer, in a file only your user account "
+                            "can read. Your AI app can now use the Meta Ads tools with your ad accounts.",
+                            "The token lasts about 60 days. When it runs out, run armavita-meta-ads-mcp --login "
+                            "again.",
                         ],
                     )
                 )
@@ -258,7 +259,7 @@ class CallbackHandler(BaseHTTPRequestHandler):
                     }
                 )
                 self._html_response(
-                    _failed_page(f"Facebook's sign-in finished, but getting the token failed ({error_code}).")
+                    _failed_page("You signed in with Facebook, but the connector couldn't get a token from it. The details are in your terminal.")
                 )
         except Exception as exc:  # noqa: BLE001
             logger.error("OAuth completion callback failed: %s", type(exc).__name__)
@@ -269,7 +270,7 @@ class CallbackHandler(BaseHTTPRequestHandler):
                     "timestamp": time.time(),
                 }
             )
-            self._html_response(_failed_page("Something went wrong while finishing the login."))
+            self._html_response(_failed_page("Something went wrong while finishing the sign-in. The details are in your terminal."))
 
         _shutdown_async()
 
