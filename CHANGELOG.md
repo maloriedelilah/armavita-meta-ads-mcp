@@ -26,6 +26,7 @@
   - A failure is "Not connected", with the reason and the command to run again.
   - A stray reply is "Nothing changed".
   - Jargon ("a CSRF check") and error codes no longer appear on the page. The terminal still prints the error code.
+- **The `--login` success page says how long the token really lasts (ADS-228).** It used to say "about 60 days" even when Facebook wouldn't extend the token and only the short-lived one (an hour or two) was stored. Now it reads the lifetime from the exchange: "about N days" for an extended token, or "Facebook didn't extend this token, so it lasts only about 2 hours. Run armavita-meta-ads-mcp --login again…" for a short one.
 
 ## 2.1.0 — 2026-11-20
 
