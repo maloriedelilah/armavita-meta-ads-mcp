@@ -17,7 +17,7 @@ It is built for local MCP clients (Claude Code, Cursor, Codex) and supports:
 - `mcp[cli]==1.27.2`
 - Meta Marketing API `v25.0` by default (`META_GRAPH_API_VERSION` override supported)
 
-Current contract version: `2.1.0` (**78 tools**). `armavita-meta-ads-mcp --version` also prints the git commit it was installed from.
+Current contract version: `2.1.1` (**78 tools**). `armavita-meta-ads-mcp --version` also prints the git commit it was installed from.
 
 The default OAuth scope (`META_AUTH_SCOPE`) requests `ads_management`, `ads_read`, `business_management`, `public_profile`, `pages_show_list` and `pages_read_engagement`. (`instagram_basic` and `threads_business_basic` were dropped in ADS-83: Facebook refuses them for this kind of login.) The catalog tools additionally require `catalog_management` — add it to `META_AUTH_SCOPE` if you use them.
 

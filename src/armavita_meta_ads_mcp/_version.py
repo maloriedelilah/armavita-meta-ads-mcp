@@ -9,4 +9,4 @@ this in sync with the `version` field in pyproject.toml on each release
 (tests/test_package_runtime.py fails if they, the README or CHANGELOG disagree).
 """
 
-__version__ = "2.1.0"
+__version__ = "2.1.1"
