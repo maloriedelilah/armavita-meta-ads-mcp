@@ -1,5 +1,8 @@
 [build-system]
-requires = ["hatchling"]
+# Pinned, and kept equal to the "build" group below (ADS-233): the Dockerfile installs that
+# group from uv.lock with hashes and builds with --no-build-isolation, so building the image
+# never fetches an unpinned hatchling. Change both together, then run `uv lock`.
+requires = ["hatchling==1.33.0"]
 build-backend = "hatchling.build"
 
 [project]
@@ -40,6 +43,11 @@ dev = [
     "pytest>=8.4.1",
     "pytest-asyncio>=1.0.0",
 ]
+
+[dependency-groups]
+# The build backend, locked with hashes in uv.lock for the Dockerfile (ADS-233). Not a default
+# group, so `uv sync` and the runtime export leave it out.
+build = ["hatchling==1.33.0"]
 
 [project.urls]
 Repository = "https://github.com/EfrainTorres/armavita-meta-ads-mcp"

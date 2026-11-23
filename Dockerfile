@@ -20,10 +20,15 @@ RUN uv export --frozen --no-dev --no-emit-project --format requirements-txt -o /
     && uv pip install --system --require-hashes --requirement /tmp/requirements.lock \
     && rm /tmp/requirements.lock
 
-# Then the project itself, without touching the locked dependencies.
+# Then the project itself, without touching the locked dependencies. The build backend
+# (pyproject's "build" group) comes from uv.lock with hashes too, and --no-build-isolation
+# builds with it, so no unpinned hatchling is fetched for the build (ADS-233).
 COPY src ./src
 COPY scripts ./scripts
-RUN uv pip install --system --no-deps .
+RUN uv export --frozen --only-group build --no-emit-project --format requirements-txt -o /tmp/build.lock \
+    && uv pip install --system --require-hashes --requirement /tmp/build.lock \
+    && rm /tmp/build.lock \
+    && uv pip install --system --no-deps --no-build-isolation .
 
 ENV PYTHONPATH=/opt/armavita/src
 

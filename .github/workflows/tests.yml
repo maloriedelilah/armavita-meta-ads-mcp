@@ -48,3 +48,10 @@ jobs:
         run: docker build -t armavita-ci .
       - name: The installed server imports and answers --help
         run: docker run --rm armavita-ci --help
+      - name: The build backend is the pinned one (ADS-233)
+        run: |
+          group="$(sed -n 's/^build = \["hatchling==\([^"]*\)"\]$/\1/p' pyproject.toml)"
+          backend="$(sed -n 's/^requires = \["hatchling==\([^"]*\)"\]$/\1/p' pyproject.toml)"
+          have="$(docker run --rm --entrypoint python armavita-ci -c 'import importlib.metadata as m; print(m.version("hatchling"))')"
+          echo "build group: $group; build-system: $backend; image: $have"
+          test -n "$group" && test "$group" = "$backend" && test "$group" = "$have"

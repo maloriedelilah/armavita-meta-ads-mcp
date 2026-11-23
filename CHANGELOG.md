@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Security
+
+- **The image builds with a locked, hash-checked build backend (ADS-233, Errata's L1 on ADS-230).**
+  - Building the project used to fetch `hatchling` from PyPI, unpinned and unhashed, through build isolation.
+  - Now `hatchling==1.33.0` is pinned in `build-system.requires` and in a non-default `build` dependency group, and locked in `uv.lock` with its dependencies.
+  - The Dockerfile installs that group with `--require-hashes`, then builds with `--no-build-isolation`.
+  - Runtime dependencies are unchanged.
+
 ## 2.1.1 — 2026-11-23
 
 ### Security
