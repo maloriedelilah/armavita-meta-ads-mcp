@@ -35,9 +35,11 @@ def test_success_page_is_titled_centered_and_explains(callback, monkeypatch):
         expires_in = 5000000
         meta_user_id = "1"
 
-    monkeypatch.setattr(auth_state, "complete_oauth_from_auth_code", lambda *a, **k: {"success": True, "token_info": Info()})
+    monkeypatch.setattr(auth_state, "complete_oauth_from_auth_code",
+                        lambda *a, **k: {"success": True, "token_info": Info(), "used_long_lived_token": True})
     page = callback(f"code=abc&state={STATE}")
     assert "Facebook API Ads MCP Connector" in page
+    assert "The token lasts about 58 days." in page  # from expires_in (5,000,000 s)
     assert "<h1>Connected to Meta</h1>" in page
     assert "Your Meta access token is saved on this computer" in page and "You can close this window." in page
     assert "text-align:center" in page and "sans-serif" in page
@@ -101,3 +103,19 @@ def test_a_failed_token_exchange_keeps_the_error_code_off_the_page(callback, mon
 def test_a_state_mismatch_is_explained_without_jargon(callback):
     page = callback("code=abc&state=WRONG")
     assert "didn&#x27;t come from the sign-in you started" in page and "CSRF" not in page
+
+
+@pytest.mark.parametrize("expires_in, words", [(5400, "about 2 hours"), (3000, "about 50 minutes"), (None, "an hour or two")])
+def test_a_short_lived_token_is_never_called_60_days(callback, monkeypatch, expires_in, words):
+    """ADS-228 (Errata's L1 on ADS-220): when Facebook won't extend the token, the page says so."""
+    class Info:
+        meta_access_token = "EAAB_SHORT_SENTINEL"
+        meta_user_id = "1"
+
+    Info.expires_in = expires_in
+    monkeypatch.setattr(auth_state, "complete_oauth_from_auth_code",
+                        lambda *a, **k: {"success": True, "token_info": Info(), "used_long_lived_token": False})
+    page = callback(f"code=abc&state={STATE}")
+    assert "<h1>Connected to Meta</h1>" in page
+    assert f"Facebook didn&#x27;t extend this token, so it lasts only {words}." in page
+    assert "about 60 days" in page and "lasts about 60 days. When" not in page
