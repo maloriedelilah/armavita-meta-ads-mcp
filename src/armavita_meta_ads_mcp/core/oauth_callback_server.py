@@ -108,6 +108,29 @@ def render_page(heading: str, paragraphs: list, tone: str = "ok", show_close: bo
 RETRY = "Nothing was saved. Go back to your terminal and run armavita-meta-ads-mcp --login again."
 
 
+def _token_lifetime(result: dict, token_info) -> str:
+    """What the success page says about how long the token lasts (Errata's L1 on ADS-220, ADS-228).
+
+    When Facebook won't extend the token, complete_oauth_from_auth_code stores the short-lived
+    one, which lasts an hour or two. Saying "about 60 days" then sent people away happy, and the
+    tools stopped working the same afternoon.
+    """
+    seconds = getattr(token_info, "expires_in", None)
+    seconds = seconds if isinstance(seconds, (int, float)) and seconds > 0 else None
+    if result.get("used_long_lived_token"):
+        days = round(seconds / 86400) if seconds else 60
+        return (f"The token lasts about {days} days. When it runs out, run armavita-meta-ads-mcp "
+                "--login again.")
+    if seconds is None:
+        left = "an hour or two"
+    elif seconds < 5400:
+        left = f"about {max(1, round(seconds / 60))} minutes"
+    else:
+        left = f"about {round(seconds / 3600)} hours"
+    return (f"Facebook didn't extend this token, so it lasts only {left}. Run armavita-meta-ads-mcp "
+            "--login again to get one that lasts about 60 days.")
+
+
 def _failed_page(reason: str) -> str:
     return render_page("Not connected", [reason, RETRY], tone="bad")
 
@@ -244,8 +267,7 @@ class CallbackHandler(BaseHTTPRequestHandler):
                         [
                             "Your Meta access token is saved on this computer, in a file only your user account "
                             "can read. Your AI app can now use the Meta Ads tools with your ad accounts.",
-                            "The token lasts about 60 days. When it runs out, run armavita-meta-ads-mcp --login "
-                            "again.",
+                            _token_lifetime(result, token_info),
                         ],
                     )
                 )
